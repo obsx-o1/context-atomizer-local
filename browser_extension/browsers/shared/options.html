@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Context Atomizer local bridge</title></head>
+  <body>
+    <main>
+      <h1>Local bridge</h1>
+      <p>Open the authenticated Atomizer Library, create a one-time pairing code, and paste it below.</p>
+      <p><strong id="connection-state">Checking local runtime…</strong></p>
+      <label>One-time pairing code <input id="pairing-code" type="password" autocomplete="off"></label>
+      <button id="pair" type="button">Pair extension</button>
+      <button id="reconnect" type="button">Verify paired runtime</button>
+      <output id="status" aria-live="polite"></output>
+    </main>
+    <script src="api.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

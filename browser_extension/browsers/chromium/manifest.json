@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Context Atomizer Local Capture",
+  "version": "0.1.0.0",
+  "version_name": "0.1.0-dev0",
+  "description": "Captures user-visible ChatGPT web messages to a user-owned local history.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "http://127.0.0.1:43117/*"
+  ],
+  "background": {
+    "service_worker": "browsers/shared/service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": [
+        "core/types.js",
+        "core/dedupe.js",
+        "core/conversation.js",
+        "core/selectors.js",
+        "core/chat_titles.js",
+        "core/capture.js",
+        "browsers/shared/api.js",
+        "browsers/shared/content_script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "browsers/shared/options.html"
+}

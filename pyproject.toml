@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "context-atomizer-local-client"
+version = "0.1.0.dev0"
+description = "Local-first capture, Library, and retrieval for Context Atomizer"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+atomizer-codex-hook = "atomizer_local_client.hosts.codex.hook_entrypoint:main"
+atomizer-local = "atomizer_local_client.runtime.lifecycle:main"
+
+[project.gui-scripts]
+atomizer-local-runtime = "atomizer_local_client.runtime.application:main"
+atomizer-local-open-library = "atomizer_local_client.runtime.lifecycle:open_library_main"
+atomizer-local-setup = "atomizer_local_client.runtime.lifecycle:setup_main"
+atomizer-local-restart = "atomizer_local_client.runtime.lifecycle:restart_main"
+atomizer-local-uninstall = "atomizer_local_client.runtime.lifecycle:uninstall_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["atomizer_local_client*"]
+
+[tool.setuptools.package-data]
+atomizer_local_client = ["history/migrations/*.sql"]

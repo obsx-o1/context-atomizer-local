@@ -1,0 +1,262 @@
+name: validate-and-package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_ARTIFACT_NAME: context-atomizer-internal-${{ github.sha }}
+  INSTALLER_NAME: ContextAtomizer-Setup-v0.1.0-dev0.exe
+  CHROMIUM_NAME: ContextAtomizer-Chromium-v0.1.0-dev0.zip
+
+jobs:
+  build_validate:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+          cache: pip
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.16.0'
+
+      - name: Install build tooling and package
+        run: python -m pip install --disable-pip-version-check -r release/requirements-build.txt .
+
+      - name: Audit repository content
+        run: python tools/repository_audit.py .
+
+      - name: Assert public NSIS candidate policy
+        shell: pwsh
+        run: |
+          $tracked = @(git ls-files)
+          $candidateText = ($tracked | Where-Object { $_ -notlike 'tests/*' } | ForEach-Object {
+            Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue
+          }) -join "`n"
+          $legacyInstaller = [string]::Concat('In','no')
+          $legacyCompiler = [string]::Concat('is','cc')
+          if ($candidateText -match ("(?i){0} Setup|\b{1}(?:\.exe)?\b" -f $legacyInstaller,$legacyCompiler)) { throw 'Legacy installer dependency/reference found.' }
+          $nsis = Get-Content -LiteralPath release/windows/ContextAtomizer.nsi -Raw
+          if ($nsis -notmatch '(?m)^SetCompressor zlib\s*$') { throw 'NSIS zlib compressor contract is missing.' }
+          if ($nsis -match '(?i)!addplugindir|\.dll\b') { throw 'Third-party NSIS plugin dependency found.' }
+          $retention = Get-Content -LiteralPath src/atomizer_local_client/library/document_registry.py -Raw
+          if ($retention -notmatch '_MAX_HISTORICAL_REVISIONS\s*=\s*10') { throw 'Public revision policy is not current plus at most 10 historical revisions.' }
+
+      - name: Build Chromium package
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP 'context-atomizer-local-build'
+          $artifacts = Join-Path $build 'artifacts'
+          New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
+          python release/build_browser.py --output (Join-Path $artifacts $env:CHROMIUM_NAME)
+
+      - name: Run Python regression
+        run: python -B -m unittest discover -s tests -v
+
+      - name: Run browser regression
+        shell: pwsh
+        run: |
+          $env:ATOMIZER_CHROMIUM_PACKAGE_ROOT = Join-Path $env:RUNNER_TEMP 'context-atomizer-local-build\artifacts\chromium-package'
+          node --test browser_extension/tests/*.test.js
+
+      - name: Check source and packaged JavaScript syntax
+        shell: pwsh
+        run: |
+          $sourceFiles = Get-ChildItem browser_extension -Recurse -File -Filter *.js | Where-Object { $_.FullName -notmatch '[\\/]dist[\\/]'}
+          $packageRoot = Join-Path $env:RUNNER_TEMP 'context-atomizer-local-build\artifacts\chromium-package'
+          $packageFiles = Get-ChildItem $packageRoot -Recurse -File -Filter *.js
+          foreach ($file in @($sourceFiles) + @($packageFiles)) { node --check $file.FullName }
+
+      - name: Compile Python and build wheel
+        run: |
+          python -m compileall -q src tests tools release browser_extension/package_extension.py
+          python -m build --wheel
+
+      - name: Provision pinned NSIS
+        shell: pwsh
+        run: |
+          $toolRoot = Join-Path $env:RUNNER_TEMP 'context-atomizer-build-tools'
+          $archive = Join-Path $toolRoot 'nsis-3.12.zip'
+          $nsisRoot = Join-Path $toolRoot 'nsis'
+          New-Item -ItemType Directory -Path $toolRoot,$nsisRoot -Force | Out-Null
+          curl.exe --fail --location --retry 5 --retry-all-errors --continue-at - --output $archive 'https://downloads.sourceforge.net/project/nsis/NSIS%203/3.12/nsis-3.12.zip?download'
+          if ($LASTEXITCODE -ne 0) { throw 'Official NSIS 3.12 download failed.' }
+          $expectedSha256 = '56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f'
+          $actualSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) { throw 'NSIS 3.12 archive SHA-256 mismatch.' }
+          Expand-Archive -LiteralPath $archive -DestinationPath $nsisRoot
+          $compiler = Join-Path $nsisRoot 'nsis-3.12\makensis.exe'
+          if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'NSIS compiler is missing.' }
+          $reportedVersion = (& $compiler /VERSION 2>&1 | Out-String).Trim()
+          if ($reportedVersion -ne 'v3.12') { throw "NSIS 3.12 is required, found $reportedVersion" }
+          "ATOMIZER_NSIS_COMPILER=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "ATOMIZER_NSIS_ARCHIVE_SHA256=$actualSha256" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build runtime and installer once
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP 'context-atomizer-local-build'
+          $runtime = Join-Path $build 'runtime'
+          $artifacts = Join-Path $build 'artifacts'
+          New-Item -ItemType Directory -Path $runtime,$artifacts -Force | Out-Null
+          python release/build_runtime.py --output $runtime
+          python release/build_windows.py --runtime $runtime --output $artifacts --compiler $env:ATOMIZER_NSIS_COMPILER
+
+      - name: Bind internal candidate metadata
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:RUNNER_TEMP 'context-atomizer-local-build'
+          $artifacts = Join-Path $build 'artifacts'
+          $candidate = Join-Path $build 'candidate'
+          New-Item -ItemType Directory -Path $candidate | Out-Null
+          $pythonTests = python -B -c "import unittest; print(unittest.defaultTestLoader.discover('tests').countTestCases())"
+          $browserTests = @(Select-String -Path browser_extension/tests/*.test.js -Pattern '^\s*test\(').Count
+          $javascriptFiles = @(Get-ChildItem browser_extension -Recurse -File -Filter *.js).Count
+          $sourceFingerprint = python -B -c "from pathlib import Path; from atomizer_local_client.runtime_health import runtime_build_fingerprint; print(runtime_build_fingerprint(Path('src/atomizer_local_client')))"
+          python release/build_candidate_metadata.py --installer (Join-Path $artifacts $env:INSTALLER_NAME) --chromium (Join-Path $artifacts $env:CHROMIUM_NAME) --runtime (Join-Path $build 'runtime\atomizer-local-runtime.exe') --runtime-identity (Join-Path $build 'runtime\runtime-build-identity.json') --output (Join-Path $candidate 'candidate-metadata.json') --commit-sha $env:GITHUB_SHA --source-fingerprint $sourceFingerprint --nsis-version 3.12 --nsis-archive-sha256 $env:ATOMIZER_NSIS_ARCHIVE_SHA256 --python-tests $pythonTests --browser-tests $browserTests --javascript-files $javascriptFiles
+          Copy-Item -LiteralPath (Join-Path $artifacts $env:INSTALLER_NAME) -Destination $candidate
+          Copy-Item -LiteralPath (Join-Path $artifacts $env:CHROMIUM_NAME) -Destination $candidate
+
+      - name: Upload immutable internal candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}\context-atomizer-local-build\candidate\*
+          if-no-files-found: error
+          retention-days: 14
+
+  lifecycle_normal:
+    needs: build_validate
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - name: Download immutable internal candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}\context-atomizer-candidate
+      - name: Test normal lifecycle in disposable state
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
+          & .\release\test_installer.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\normal.json')
+      - name: Upload normal diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lifecycle-normal-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-diagnostic\normal.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  lifecycle_ambiguous:
+    needs: build_validate
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - name: Download immutable internal candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}\context-atomizer-candidate
+      - name: Test ambiguous ownership lifecycle in disposable state
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
+          & .\release\test_installer_ambiguous.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\ambiguous.json')
+      - name: Upload ambiguous diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lifecycle-ambiguous-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-diagnostic\ambiguous.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  lifecycle_failure:
+    needs: build_validate
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - name: Download immutable internal candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}\context-atomizer-candidate
+      - name: Test unexpected manager failure lifecycle in disposable state
+        shell: pwsh
+        run: |
+          $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
+          & .\release\test_installer_failure.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\failure.json')
+      - name: Upload failure diagnostic
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lifecycle-failure-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-diagnostic\failure.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  finalize_artifact:
+    needs: [build_validate, lifecycle_normal, lifecycle_ambiguous, lifecycle_failure]
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12.10'
+      - name: Download immutable internal candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}\context-atomizer-candidate
+      - name: Download normal diagnostic
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: lifecycle-normal-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-receipts\normal
+      - name: Download ambiguous diagnostic
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: lifecycle-ambiguous-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-receipts\ambiguous
+      - name: Download failure diagnostic
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
+        with:
+          name: lifecycle-failure-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-receipts\failure
+      - name: Finalize exact tested candidate without rebuild
+        shell: pwsh
+        run: |
+          python release/finalize_candidate.py --candidate (Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate\candidate-metadata.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\normal\normal.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\ambiguous\ambiguous.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\failure\failure.json') --output (Join-Path $env:RUNNER_TEMP 'context-atomizer-final')
+      - name: Upload one final candidate artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: context-atomizer-local-${{ github.sha }}
+          path: ${{ runner.temp }}\context-atomizer-final\*
+          if-no-files-found: error
+          retention-days: 14

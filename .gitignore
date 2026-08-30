@@ -1,0 +1,53 @@
+# Python environments and generated metadata
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local application and credential state
+history.sqlite3
+*.sqlite3
+permissions.json
+runtime.json
+runtime-state.json
+runtime.lock
+bridge-credential.bin
+*.jsonl
+logs/
+*.log
+*.dmp
+
+# Secrets and machine-local configuration
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Build products and disposable acceptance state
+build/
+dist/
+artifacts/
+installer-output/
+browser_extension/dist/
+acceptance-state/
+*.spec
+*.zip
+*.exe
+*.msi
+*.msix
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tmp
+*.temp
+*.bak
+*~
