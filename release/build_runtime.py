@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -70,16 +71,16 @@ def build_runtime(project_root: Path, output_directory: Path) -> None:
             "--copy-metadata",
             "context-atomizer-local-client",
             "--add-data",
-            f"{migrations};atomizer_local_client/history/migrations",
+            f"{migrations}{os.pathsep}atomizer_local_client/history/migrations",
             "--add-data",
-            f"{identity_path};atomizer_local_client",
+            f"{identity_path}{os.pathsep}atomizer_local_client",
             "--distpath",
             str(output_directory),
             "--workpath",
             str(work_root / name),
             "--specpath",
             str(work_root),
-            "--windowed" if windowed else "--console",
+            "--windowed" if windowed and sys.platform == "win32" else "--console",
             str(entries / entrypoint),
         ]
         subprocess.run(command, cwd=project_root, check=True)

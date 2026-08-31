@@ -12,7 +12,7 @@ from pathlib import Path
 
 TEXT_SUFFIXES = {
     ".css", ".html", ".js", ".json", ".md", ".nsi", ".ps1", ".py",
-    ".sql", ".toml", ".txt", ".yml", ".yaml",
+    ".sh", ".sql", ".toml", ".txt", ".yml", ".yaml",
 }
 IGNORED_PARTS = {
     ".git", ".venv", "artifacts", "build", "dist", "node_modules", "__pycache__",

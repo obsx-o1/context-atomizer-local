@@ -961,15 +961,15 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         self.assertIn('"runtime_executable_sha256"', manifest_builder)
         self.assertIn("BUILD_IDENTITY_FILENAME", runtime_builder)
 
-    def test_ci_is_a_build_once_five_job_lifecycle_dag(self) -> None:
+    def test_ci_preserves_build_once_five_job_windows_lifecycle_dag(self) -> None:
         workflow = (PACKAGE_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
         jobs = re.findall(
-            r"^  ([a-z_]+):\n", workflow[workflow.index("jobs:\n") :], flags=re.MULTILINE
+            r"^  ([a-z0-9_]+):\n", workflow[workflow.index("jobs:\n") :], flags=re.MULTILINE
         )
         self.assertEqual(
-            jobs,
+            jobs[:5],
             [
                 "build_validate",
                 "lifecycle_normal",
@@ -978,7 +978,8 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
                 "finalize_artifact",
             ],
         )
-        self.assertEqual(workflow.count("release/build_runtime.py"), 1)
+        self.assertEqual(jobs[5:], ["macos_arm64", "macos_intel"])
+        self.assertEqual(workflow.count("release/build_runtime.py"), 3)
         self.assertEqual(workflow.count("release/build_windows.py"), 1)
         self.assertIn("needs: build_validate", workflow)
         self.assertEqual(workflow.count("needs: build_validate"), 3)
@@ -988,7 +989,7 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         )
         download = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
         self.assertEqual(workflow.count(download), 4)
-        self.assertEqual(workflow.count("if: always()"), 0)
+        self.assertEqual(workflow.count("if: always()"), 2)
         self.assertIn("# v4, MIT", workflow)
         self.assertNotIn("Upload normal diagnostic", workflow)
         self.assertNotIn("Upload ambiguous diagnostic", workflow)
@@ -996,10 +997,33 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         self.assertNotIn("lifecycle-normal-${{ github.sha }}", workflow)
         self.assertNotIn("lifecycle-ambiguous-${{ github.sha }}", workflow)
         self.assertNotIn("lifecycle-failure-${{ github.sha }}", workflow)
-        finalize = workflow[workflow.index("  finalize_artifact:") :]
+        finalize = workflow[
+            workflow.index("  finalize_artifact:") : workflow.index("  macos_arm64:")
+        ]
         self.assertNotIn("build_runtime.py", finalize)
         self.assertNotIn("build_windows.py", finalize)
         self.assertIn("finalize_candidate.py", finalize)
+
+    def test_ci_uses_explicit_native_macos_labels_and_isolated_keychains(self) -> None:
+        workflow = (PACKAGE_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("  macos_arm64:\n    runs-on: macos-15\n", workflow)
+        self.assertIn("  macos_intel:\n    runs-on: macos-15-intel\n", workflow)
+        self.assertIn('test "${{ runner.arch }}" = "ARM64"', workflow)
+        self.assertIn('test "${{ runner.arch }}" = "X64"', workflow)
+        self.assertIn('test "$(uname -m)" = "arm64"', workflow)
+        self.assertIn('test "$(uname -m)" = "x86_64"', workflow)
+        self.assertEqual(workflow.count("security create-keychain"), 2)
+        self.assertEqual(workflow.count("ATOMIZER_MACOS_KEYCHAIN="), 2)
+        self.assertEqual(workflow.count("security delete-keychain"), 2)
+        self.assertEqual(workflow.count("release/build_macos.py"), 2)
+        self.assertEqual(workflow.count("release/test_macos_lifecycle.py"), 4)
+        self.assertEqual(workflow.count("release/build_browser.py"), 3)
+        self.assertEqual(workflow.count("ATOMIZER_CHROMIUM_PACKAGE_ROOT"), 5)
+        self.assertEqual(workflow.count("test -f \"$database\""), 2)
+        self.assertIn("--architecture arm64", workflow)
+        self.assertIn("--architecture x86_64", workflow)
 
     def test_lifecycle_receipts_are_candidate_bound_and_content_safe(self) -> None:
         common = (PACKAGE_ROOT / "release" / "test_installer_common.ps1").read_text(

@@ -12,9 +12,11 @@ import urllib.error
 import urllib.request
 import webbrowser
 import ctypes
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from atomizer_local_client.platforms.credentials import current_credential_store
 from atomizer_local_client.runtime.codex_integration import (
     codex_hook_file_has_atomizer_entries,
     codex_hook_file_is_empty,
@@ -28,7 +30,6 @@ from atomizer_local_client.runtime.configuration import (
     read_state,
     remove_state,
 )
-from atomizer_local_client.runtime.credentials import CredentialStore
 from atomizer_local_client.runtime.windows_startup import (
     WindowsRunRegistration,
     runtime_startup_command,
@@ -45,6 +46,15 @@ class StartupRegistration(Protocol):
 
 def _runtime_command_prefix() -> list[str]:
     scripts = Path(sys.executable).resolve().parent
+    if sys.platform == "darwin":
+        packaged = scripts / "atomizer-local-runtime"
+        if packaged.is_file():
+            return [str(packaged)]
+        return [
+            str(Path(sys.executable).resolve()),
+            "-m",
+            "atomizer_local_client.runtime.application",
+        ]
     packaged = scripts / "atomizer-local-runtime.exe"
     if packaged.is_file():
         return [str(packaged)]
@@ -55,7 +65,10 @@ def _runtime_command_prefix() -> list[str]:
 
 
 def _hook_executable() -> Path:
-    executable = Path(sys.executable).resolve().parent / "atomizer-codex-hook.exe"
+    executable_name = (
+        "atomizer-codex-hook" if sys.platform == "darwin" else "atomizer-codex-hook.exe"
+    )
+    executable = Path(sys.executable).resolve().parent / executable_name
     if not executable.is_file():
         raise RuntimeError("the packaged Codex hook executable is not installed")
     return executable
@@ -110,13 +123,19 @@ class LifecycleManager:
         credential_store: Any | None = None,
         process_launcher: RuntimeProcessLauncher | None = None,
         runtime_identity: RuntimeIdentity | None = None,
+        startup_command_builder: Callable[[list[str], Path], str] = runtime_startup_command,
+        url_opener: Callable[[str], bool] = webbrowser.open,
     ) -> None:
         self.paths = paths
         self.startup = startup
         self.runtime_command_prefix = list(runtime_command_prefix)
-        self.credential_store = credential_store or CredentialStore(paths.credential)
+        self.credential_store = credential_store or current_credential_store(
+            paths.credential
+        )
         self.process_launcher = process_launcher or RuntimeProcessLauncher()
         self.runtime_identity = runtime_identity or RuntimeIdentity()
+        self.startup_command_builder = startup_command_builder
+        self.url_opener = url_opener
         self.permission_store = PermissionStore(paths.permissions)
 
     def _command(self) -> list[str]:
@@ -162,14 +181,23 @@ class LifecycleManager:
         codex_hook_executable: Path | None = None,
         chatgpt_enabled: bool | None = None,
     ) -> dict[str, object]:
-        self.paths.app_data.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.permissions import (
+                ensure_private_directory,
+            )
+
+            ensure_private_directory(self.paths.app_data)
+        else:
+            self.paths.app_data.mkdir(parents=True, exist_ok=True)
         effective = config
         if effective is None and self.paths.config.exists():
             effective = RuntimeConfig.load(self.paths.config)
         effective = effective or RuntimeConfig()
         effective.save(self.paths.config)
         self.credential_store.load_or_create()
-        command = runtime_startup_command(self.runtime_command_prefix, self.paths.config)
+        command = self.startup_command_builder(
+            self.runtime_command_prefix, self.paths.config
+        )
         self.startup.install(command)
         if chatgpt_enabled is not None:
             self.permission_store.set_enabled("chatgpt_web", chatgpt_enabled)
@@ -325,7 +353,9 @@ class LifecycleManager:
             self.permission_store.set_enabled("codex", True)
         if read_state(self.paths.state) is not None:
             self.stop()
-        command = runtime_startup_command(self.runtime_command_prefix, self.paths.config)
+        command = self.startup_command_builder(
+            self.runtime_command_prefix, self.paths.config
+        )
         self.startup.install(command)
         status = self.start()
         return {
@@ -400,7 +430,7 @@ class LifecycleManager:
             codex_changed = codex_changed_paths > 0
         self.startup.remove()
         self.credential_store.remove()
-        CredentialStore(
+        current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         ).remove()
@@ -447,10 +477,24 @@ class LifecycleManager:
         url = payload.get("url")
         if not isinstance(url, str) or not url.startswith("http://127.0.0.1:"):
             raise RuntimeError("runtime returned an invalid Library launch capability")
-        return webbrowser.open(url)
+        return self.url_opener(url)
 
 
 def _manager() -> LifecycleManager:
+    if sys.platform == "darwin":
+        from atomizer_local_client.platforms.macos.browser import open_url
+        from atomizer_local_client.platforms.macos.launch_agent import (
+            MacOSLaunchAgentRegistration,
+            runtime_startup_command as macos_runtime_startup_command,
+        )
+
+        return LifecycleManager(
+            RuntimePaths.current_user(),
+            startup=MacOSLaunchAgentRegistration(),
+            runtime_command_prefix=_runtime_command_prefix(),
+            startup_command_builder=macos_runtime_startup_command,
+            url_opener=open_url,
+        )
     return LifecycleManager(
         RuntimePaths.current_user(),
         startup=WindowsRunRegistration(),

@@ -1,6 +1,6 @@
 # Install and run
 
-This development snapshot targets Windows 10 or later on x64-compatible systems. Generated installers are unsigned development artifacts.
+This development snapshot targets Windows 10 or later on x64-compatible systems. It also contains an experimental macOS foundation for Apple Silicon and Intel with native CI jobs configured but not yet completed, and it is not yet human host-smoke validated. Generated installers and macOS archives are unsigned development artifacts.
 
 ## From source
 
@@ -26,3 +26,19 @@ python release\build_windows.py --runtime "$env:TEMP\context-atomizer-runtime" -
 ```
 
 NSIS 3.12 is the approved permissively licensed Windows installer builder. CI downloads the official portable archive, verifies its pinned SHA-256, and uses `SetCompressor zlib`; no global installation or third-party plugin is required. Validate installers only against disposable profile, registry, and state locations; the repository CI performs that lifecycle on a disposable runner.
+
+## Experimental macOS artifact
+
+Native GitHub-hosted macOS jobs produce separate thin `arm64` and `x86_64`
+tar archives. After extraction, the user-level development install is:
+
+```sh
+./ContextAtomizerLocal/install.sh
+```
+
+No `sudo`, LaunchDaemon, signing, or notarization is used. State is stored
+under `~/Library/Application Support/Context Atomizer`, credentials are stored
+in the user's Keychain, and startup is registered through the user's
+`~/Library/LaunchAgents` directory. Run the installed `uninstall` command to
+remove owned runtime state while preserving the Library database. See
+[MACOS.md](MACOS.md) for limitations and current platform evidence.
