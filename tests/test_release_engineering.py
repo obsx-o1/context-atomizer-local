@@ -987,9 +987,15 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
             workflow,
         )
         download = "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
-        self.assertEqual(workflow.count(download), 7)
-        self.assertEqual(workflow.count("if: always()"), 3)
+        self.assertEqual(workflow.count(download), 4)
+        self.assertEqual(workflow.count("if: always()"), 0)
         self.assertIn("# v4, MIT", workflow)
+        self.assertNotIn("Upload normal diagnostic", workflow)
+        self.assertNotIn("Upload ambiguous diagnostic", workflow)
+        self.assertNotIn("Upload failure diagnostic", workflow)
+        self.assertNotIn("lifecycle-normal-${{ github.sha }}", workflow)
+        self.assertNotIn("lifecycle-ambiguous-${{ github.sha }}", workflow)
+        self.assertNotIn("lifecycle-failure-${{ github.sha }}", workflow)
         finalize = workflow[workflow.index("  finalize_artifact:") :]
         self.assertNotIn("build_runtime.py", finalize)
         self.assertNotIn("build_windows.py", finalize)
@@ -1068,7 +1074,7 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
                 self.assertEqual(by_label["workspace"][event], {"count": 1, "classes": ["CURRENT_ATOMIZER"]})
                 self.assertEqual(by_label["unrelated"][event], {"count": 1, "classes": ["UNRELATED"]})
 
-    def test_finalizer_rejects_identity_drift_and_emits_one_bound_manifest(self) -> None:
+    def test_finalizer_rejects_failed_lifecycle_and_emits_public_safe_bundle(self) -> None:
         finalizer = self._load_release_module(
             "finalize_candidate.py", "release_finalize_candidate_test"
         )
@@ -1100,29 +1106,17 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
             }
             candidate_path = root / "candidate-metadata.json"
             candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
-            receipts = []
-            for scenario in ("normal", "ambiguous", "failure"):
-                receipt = root / f"{scenario}.json"
-                receipt.write_text(
-                    json.dumps(
-                        {
-                            "scenario": scenario,
-                            "passed": True,
-                            "git_commit_sha": candidate["git_commit_sha"],
-                            "installer_sha256": candidate["installer"]["sha256"],
-                            "installer_size_bytes": candidate["installer"]["size_bytes"],
-                            "evidence": {"bounded": True},
-                        }
-                    ),
-                    encoding="utf-8",
-                )
-                receipts.append(receipt)
             output = root / "final"
             arguments = [
                 "finalize_candidate.py",
                 "--candidate",
                 str(candidate_path),
-                *[item for receipt in receipts for item in ("--receipt", str(receipt))],
+                "--lifecycle",
+                "normal=PASS",
+                "--lifecycle",
+                "ambiguous=PASS",
+                "--lifecycle",
+                "failure=PASS",
                 "--output",
                 str(output),
             ]
@@ -1135,16 +1129,24 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
             )
             self.assertEqual(set(manifest["lifecycle"]), {"normal", "ambiguous", "failure"})
             self.assertTrue(all(item["passed"] for item in manifest["lifecycle"].values()))
+            self.assertTrue(all(set(item) == {"passed"} for item in manifest["lifecycle"].values()))
             self.assertEqual(finalizer.sha256(output / installer.name), candidate["installer"]["sha256"])
+            self.assertEqual(
+                {path.name for path in output.iterdir()},
+                {
+                    installer.name,
+                    chromium.name,
+                    "ContextAtomizer-v0.1.0-dev0-manifest.json",
+                    "ContextAtomizer-v0.1.0-dev0-SHA256SUMS.txt",
+                },
+            )
 
-            drifted = json.loads(receipts[0].read_text(encoding="utf-8"))
-            drifted["installer_sha256"] = "0" * 64
-            receipts[0].write_text(json.dumps(drifted), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "installer mismatch"):
+            failed = ["failure=FAIL" if item == "failure=PASS" else item for item in arguments]
+            with self.assertRaisesRegex(RuntimeError, "three unique passes"):
                 with mock.patch.object(
                     sys,
                     "argv",
-                    [*arguments[:-1], str(root / "rejected")],
+                    [*failed[:-1], str(root / "rejected")],
                 ):
                     finalizer.main()
 

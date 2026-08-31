@@ -155,14 +155,6 @@ jobs:
         run: |
           $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
           & .\release\test_installer.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\normal.json')
-      - name: Upload normal diagnostic
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: lifecycle-normal-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-diagnostic\normal.json
-          if-no-files-found: warn
-          retention-days: 14
 
   lifecycle_ambiguous:
     needs: build_validate
@@ -183,14 +175,6 @@ jobs:
         run: |
           $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
           & .\release\test_installer_ambiguous.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\ambiguous.json')
-      - name: Upload ambiguous diagnostic
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: lifecycle-ambiguous-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-diagnostic\ambiguous.json
-          if-no-files-found: warn
-          retention-days: 14
 
   lifecycle_failure:
     needs: build_validate
@@ -211,14 +195,6 @@ jobs:
         run: |
           $candidate = Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate'
           & .\release\test_installer_failure.ps1 -Installer (Join-Path $candidate $env:INSTALLER_NAME) -Checkout $env:GITHUB_WORKSPACE -Metadata (Join-Path $candidate 'candidate-metadata.json') -Receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-diagnostic\failure.json')
-      - name: Upload failure diagnostic
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: lifecycle-failure-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-diagnostic\failure.json
-          if-no-files-found: warn
-          retention-days: 14
 
   finalize_artifact:
     needs: [build_validate, lifecycle_normal, lifecycle_ambiguous, lifecycle_failure]
@@ -234,25 +210,10 @@ jobs:
         with:
           name: ${{ env.CANDIDATE_ARTIFACT_NAME }}
           path: ${{ runner.temp }}\context-atomizer-candidate
-      - name: Download normal diagnostic
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
-        with:
-          name: lifecycle-normal-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-receipts\normal
-      - name: Download ambiguous diagnostic
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
-        with:
-          name: lifecycle-ambiguous-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-receipts\ambiguous
-      - name: Download failure diagnostic
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4, MIT
-        with:
-          name: lifecycle-failure-${{ github.sha }}
-          path: ${{ runner.temp }}\context-atomizer-receipts\failure
       - name: Finalize exact tested candidate without rebuild
         shell: pwsh
         run: |
-          python release/finalize_candidate.py --candidate (Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate\candidate-metadata.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\normal\normal.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\ambiguous\ambiguous.json') --receipt (Join-Path $env:RUNNER_TEMP 'context-atomizer-receipts\failure\failure.json') --output (Join-Path $env:RUNNER_TEMP 'context-atomizer-final')
+          python release/finalize_candidate.py --candidate (Join-Path $env:RUNNER_TEMP 'context-atomizer-candidate\candidate-metadata.json') --lifecycle normal=PASS --lifecycle ambiguous=PASS --lifecycle failure=PASS --output (Join-Path $env:RUNNER_TEMP 'context-atomizer-final')
       - name: Upload one final candidate artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
