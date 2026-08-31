@@ -5,6 +5,7 @@ import io
 import json
 import os
 import plistlib
+import shutil
 import sqlite3
 import stat
 import struct
@@ -271,6 +272,10 @@ class MacOSPlatformTests(unittest.TestCase):
             '{"schema_version": 1, "runtime_build_fingerprint": "fixture"}\n',
             encoding="utf-8",
         )
+        shutil.copytree(
+            PACKAGE_ROOT / "src" / "atomizer_local_client" / "portable_plugin",
+            runtime / "portable_plugin",
+        )
         with mock.patch.object(builder.platform, "system", return_value="Darwin"), mock.patch.object(
             builder.platform, "machine", return_value="arm64"
         ):
@@ -296,6 +301,9 @@ class MacOSPlatformTests(unittest.TestCase):
             metadata["validation"], "native-ci-required-before-distribution"
         )
         self.assertIn("ContextAtomizerLocal/bin/atomizer-local-runtime", names)
+        self.assertIn("ContextAtomizerLocal/bin/atomizer-claude-hook", names)
+        self.assertIn("ContextAtomizerLocal/bin/atomizer-local-mcp", names)
+        self.assertIn("ContextAtomizerLocal/portable_plugin/plugin.json", names)
         self.assertNotIn("sudo", install)
         self.assertNotIn("LaunchDaemons", install)
 
@@ -306,6 +314,10 @@ class MacOSPlatformTests(unittest.TestCase):
         for name in builder.EXECUTABLES:
             (runtime / name).write_bytes(b"\xca\xfe\xba\xbe" + b"\0" * 4)
         (runtime / "runtime-build-identity.json").write_text("{}", encoding="utf-8")
+        shutil.copytree(
+            PACKAGE_ROOT / "src" / "atomizer_local_client" / "portable_plugin",
+            runtime / "portable_plugin",
+        )
         with mock.patch.object(builder.platform, "system", return_value="Darwin"), mock.patch.object(
             builder.platform, "machine", return_value="arm64"
         ):
@@ -425,6 +437,20 @@ class WindowsCompatibilitySeamTests(unittest.TestCase):
                 ],
             )
 
+    def test_macos_claude_hook_discovery_uses_the_native_executable_name(self) -> None:
+        from atomizer_local_client.runtime import lifecycle
+
+        scripts = self.root / "runtime"
+        scripts.mkdir()
+        manager = scripts / "atomizer-local-manager"
+        hook = scripts / "atomizer-claude-hook"
+        manager.write_bytes(b"")
+        hook.write_bytes(b"")
+        with mock.patch.object(lifecycle.sys, "platform", "darwin"), mock.patch.object(
+            lifecycle.sys, "executable", str(manager)
+        ):
+            self.assertEqual(lifecycle._claude_hook_executable(), hook.resolve())
+
     def test_windows_lifecycle_composition_keeps_existing_adapters(self) -> None:
         from atomizer_local_client.runtime import lifecycle
 
@@ -479,7 +505,7 @@ class WindowsCompatibilitySeamTests(unittest.TestCase):
             builder.os, "pathsep", ";"
         ), mock.patch.object(builder.subprocess, "run", side_effect=capture):
             builder.build_runtime(PACKAGE_ROOT, output)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 6)
         for command in calls:
             data_values = [
                 command[index + 1]
@@ -490,6 +516,7 @@ class WindowsCompatibilitySeamTests(unittest.TestCase):
             self.assertTrue(all(";atomizer_local_client" in value for value in data_values))
         self.assertIn("--windowed", calls[0])
         self.assertIn("--console", calls[1])
+        self.assertTrue((output / "portable_plugin" / "plugin.json").is_file())
 
 
 @unittest.skipUnless(sys.platform == "darwin", "requires macOS Keychain Services")

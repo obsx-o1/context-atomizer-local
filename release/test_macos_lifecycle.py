@@ -12,9 +12,9 @@ from pathlib import Path
 _PROBE_VALUE = "context-atomizer-macos-library-preservation-v1"
 
 
-def _manager(executable: Path, command: str) -> dict[str, object]:
+def _manager(executable: Path, command: str, *arguments: str) -> dict[str, object]:
     result = subprocess.run(
-        [str(executable), command],
+        [str(executable), command, *arguments],
         check=True,
         capture_output=True,
         text=True,
@@ -23,6 +23,35 @@ def _manager(executable: Path, command: str) -> dict[str, object]:
     payload = json.loads(result.stdout)
     if not isinstance(payload, dict):
         raise RuntimeError("manager response must be an object")
+    return payload
+
+
+def _mcp_request(
+    executable: Path,
+    database: Path,
+    request: dict[str, object],
+    *,
+    access_mode: str | None = None,
+) -> dict[str, object]:
+    command = [str(executable), "--database", str(database)]
+    if access_mode is not None:
+        command.extend(("--access-mode", access_mode))
+    result = subprocess.run(
+        command,
+        input=json.dumps(request, separators=(",", ":")) + "\n",
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    if result.stderr:
+        raise RuntimeError("packaged MCP server wrote diagnostics during a valid request")
+    lines = result.stdout.splitlines()
+    if len(lines) != 1:
+        raise RuntimeError("packaged MCP server did not emit exactly one response")
+    payload = json.loads(lines[0])
+    if not isinstance(payload, dict):
+        raise RuntimeError("packaged MCP response must be an object")
     return payload
 
 
@@ -72,6 +101,85 @@ def validate_lifecycle(manager: Path, database: Path) -> None:
         ).fetchone()[0]
     if migrations < 7:
         raise RuntimeError("macOS Library did not apply the existing migrations")
+
+    settings = Path.home() / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "hooks": {
+                    "Stop": [
+                        {"hooks": [{"type": "command", "command": "/usr/bin/true"}]}
+                    ]
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    updated = _manager(
+        manager,
+        "update",
+        "--enable-claude",
+        "--claude-settings",
+        str(settings),
+    )
+    if updated.get("claude_hooks_changed") is not True:
+        raise RuntimeError("packaged Claude hook integration was not installed")
+    configured = json.loads(settings.read_text(encoding="utf-8"))
+    if configured.get("theme") != "dark":
+        raise RuntimeError("Claude integration did not preserve unrelated settings")
+    if "atomizer-claude-hook" not in json.dumps(configured):
+        raise RuntimeError("Claude integration did not register its packaged executable")
+
+    mcp = manager.parent / "atomizer-local-mcp"
+    metadata = {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": {
+            "name": "context-atomizer-macos-ci",
+            "version": "1.0.0",
+        },
+    }
+    discovery = _mcp_request(
+        mcp,
+        database,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "server/discover",
+            "params": {"_meta": metadata},
+        },
+    )
+    if discovery.get("result", {}).get("supportedVersions") != ["2026-07-28"]:
+        raise RuntimeError("packaged MCP discovery did not use the pinned protocol")
+    denied = _mcp_request(
+        mcp,
+        database,
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "search_library",
+                "arguments": {"query": "preservation"},
+                "_meta": metadata,
+            },
+        },
+        access_mode="MANAGED_EXCLUSIVE",
+    )
+    content = denied.get("result", {}).get("content", [])
+    if not content:
+        raise RuntimeError("packaged MCP tool call returned no protocol content")
+    denial = json.loads(content[0]["text"])
+    if denial.get("status") != "managed_exclusive" or denial.get("items") != []:
+        raise RuntimeError("managed-exclusive MCP access exposed Library content")
+
+    plugin = manager.parent / "portable_plugin"
+    for relative in ("plugin.json", "mcp.json", "openai.mcp.json", ".mcp.json"):
+        if not (plugin / relative).is_file():
+            raise RuntimeError(f"packaged portable plugin is missing {relative}")
 
 
 def main() -> int:

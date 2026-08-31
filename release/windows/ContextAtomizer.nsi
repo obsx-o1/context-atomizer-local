@@ -111,6 +111,8 @@ Section "Core application" SEC_CORE
   File "${SourceDir}\atomizer-local-open-library.exe"
   File "${SourceDir}\atomizer-codex-hook.exe"
   File "${SourceDir}\atomizer-claude-hook.exe"
+  File "${SourceDir}\atomizer-local-mcp.exe"
+  File /r "${SourceDir}\portable_plugin"
 
   CreateDirectory "$SMPROGRAMS\Context Atomizer Local"
   CreateShortCut "$SMPROGRAMS\Context Atomizer Local\Context Atomizer Library.lnk" "$INSTDIR\atomizer-local-open-library.exe" "" "$INSTDIR\atomizer-local-open-library.exe"
@@ -215,6 +217,8 @@ cleanup_files:
   Delete "$INSTDIR\atomizer-local-open-library.exe"
   Delete "$INSTDIR\atomizer-codex-hook.exe"
   Delete "$INSTDIR\atomizer-claude-hook.exe"
+  Delete "$INSTDIR\atomizer-local-mcp.exe"
+  RMDir /r "$INSTDIR\portable_plugin"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ContextAtomizerLocal"

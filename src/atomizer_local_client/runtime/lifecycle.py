@@ -79,7 +79,12 @@ def _hook_executable() -> Path:
 
 
 def _claude_hook_executable() -> Path:
-    executable = Path(sys.executable).resolve().parent / "atomizer-claude-hook.exe"
+    executable_name = (
+        "atomizer-claude-hook"
+        if sys.platform == "darwin"
+        else "atomizer-claude-hook.exe"
+    )
+    executable = Path(sys.executable).resolve().parent / executable_name
     if not executable.is_file():
         raise RuntimeError("the packaged Claude hook executable is not installed")
     return executable

@@ -17,6 +17,8 @@ EXECUTABLES = (
     "atomizer-local-manager",
     "atomizer-local-open-library",
     "atomizer-codex-hook",
+    "atomizer-claude-hook",
+    "atomizer-local-mcp",
 )
 CPU_TYPES = {"arm64": 0x0100000C, "x86_64": 0x01000007}
 MACHO_64_MAGIC = 0xFEEDFACF
@@ -60,6 +62,9 @@ def build_macos_artifact(
     identity = runtime_directory / "runtime-build-identity.json"
     if not identity.is_file():
         raise FileNotFoundError(identity)
+    portable_plugin = runtime_directory / "portable_plugin"
+    if not (portable_plugin / "plugin.json").is_file():
+        raise FileNotFoundError("portable Agent Plugin payload is missing")
 
     version = read_release_version(project_root)
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -78,6 +83,7 @@ def build_macos_artifact(
             shutil.copy2(runtime_directory / name, target)
             target.chmod(0o700)
         shutil.copy2(identity, binaries / identity.name)
+        shutil.copytree(portable_plugin, bundle / "portable_plugin")
         shutil.copy2(project_root / "release" / "macos" / "install.sh", bundle / "install.sh")
         shutil.copy2(
             project_root / "release" / "macos" / "uninstall.sh", bundle / "uninstall.sh"

@@ -17,6 +17,7 @@ EXECUTABLES = (
     ("atomizer-local-open-library", "open_library.py", True),
     ("atomizer-codex-hook", "codex_hook.py", False),
     ("atomizer-claude-hook", "claude_hook.py", False),
+    ("atomizer-local-mcp", "mcp.py", False),
 )
 
 
@@ -85,6 +86,10 @@ def build_runtime(project_root: Path, output_directory: Path) -> None:
             str(entries / entrypoint),
         ]
         subprocess.run(command, cwd=project_root, check=True)
+    shutil.copytree(
+        source_root / "atomizer_local_client" / "portable_plugin",
+        output_directory / "portable_plugin",
+    )
 
 
 def main() -> int:
