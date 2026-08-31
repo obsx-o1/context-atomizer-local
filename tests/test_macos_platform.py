@@ -193,6 +193,36 @@ class MacOSPlatformTests(unittest.TestCase):
         self.assertEqual(ctypes.string_at(call.args[3], 3), b"new")
         backend.core_foundation.CFRelease.assert_called_once_with(item)
 
+    def test_keychain_acl_array_retains_trusted_applications(self) -> None:
+        backend = SecurityFrameworkKeychain.__new__(SecurityFrameworkKeychain)
+        backend.security = mock.Mock()
+        backend.core_foundation = mock.Mock()
+        backend._cf_type_array_callbacks = ctypes.c_int(0)
+
+        def create_trusted_application(path, reference) -> int:
+            del path
+            reference._obj.value = 11
+            return 0
+
+        def create_access(description, applications, reference) -> int:
+            del description, applications
+            reference._obj.value = 44
+            return 0
+
+        backend.security.SecTrustedApplicationCreateFromPath.side_effect = (
+            create_trusted_application
+        )
+        backend.security.SecAccessCreate.side_effect = create_access
+        backend.core_foundation.CFArrayCreate.return_value = 22
+        backend.core_foundation.CFStringCreateWithCString.return_value = 33
+
+        with backend._access("account", (Path(sys.executable),)) as access:
+            self.assertEqual(access.value, 44)
+
+        callbacks = backend.core_foundation.CFArrayCreate.call_args.args[3]
+        self.assertIsNotNone(callbacks)
+        self.assertEqual(callbacks._obj.value, 0)
+
     def test_credential_selector_uses_keychain_only_for_macos(self) -> None:
         from atomizer_local_client.platforms.credentials import current_credential_store
 

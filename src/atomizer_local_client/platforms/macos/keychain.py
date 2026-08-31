@@ -34,6 +34,16 @@ class _SecKeychainAttributeList(ctypes.Structure):
     ]
 
 
+class _CFArrayCallBacks(ctypes.Structure):
+    _fields_ = [
+        ("version", ctypes.c_long),
+        ("retain", ctypes.c_void_p),
+        ("release", ctypes.c_void_p),
+        ("copy_description", ctypes.c_void_p),
+        ("equal", ctypes.c_void_p),
+    ]
+
+
 class KeychainBackend(Protocol):
     def load(self, service: str, account: str) -> bytes: ...
     def store(
@@ -113,9 +123,12 @@ class SecurityFrameworkKeychain:
             pointer,
             ctypes.POINTER(pointer),
             ctypes.c_long,
-            pointer,
+            ctypes.POINTER(_CFArrayCallBacks),
         ]
         self.core_foundation.CFArrayCreate.restype = pointer
+        self._cf_type_array_callbacks = _CFArrayCallBacks.in_dll(
+            self.core_foundation, "kCFTypeArrayCallBacks"
+        )
         self.core_foundation.CFRelease.argtypes = [pointer]
         self.core_foundation.CFRelease.restype = None
 
@@ -187,7 +200,10 @@ class SecurityFrameworkKeychain:
             )
             array_ref = ctypes.c_void_p(
                 self.core_foundation.CFArrayCreate(
-                    None, values, len(trusted), None
+                    None,
+                    values,
+                    len(trusted),
+                    ctypes.byref(self._cf_type_array_callbacks),
                 )
             )
             description_ref = ctypes.c_void_p(
