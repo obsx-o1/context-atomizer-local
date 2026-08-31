@@ -527,15 +527,43 @@ class MacOSNativeKeychainTests(unittest.TestCase):
             self.skipTest("isolated CI keychain is not configured")
         self.assertTrue(Path(isolated).is_file())
         with tempfile.TemporaryDirectory() as temporary:
-            store = MacOSKeychainCredentialStore(Path(temporary) / "credential.bin")
-            first = store.load_or_create()
-            self.assertEqual(store.load(), first)
-            second = store.rotate()
-            self.assertNotEqual(first, second)
-            self.assertEqual(store.load(), second)
-            store.remove()
-            with self.assertRaises(FileNotFoundError):
-                store.load()
+            probe = "\n".join(
+                (
+                    "import sys",
+                    "from pathlib import Path",
+                    "from atomizer_local_client.platforms.macos.keychain import (",
+                    "    MacOSKeychainCredentialStore,",
+                    ")",
+                    "store = MacOSKeychainCredentialStore(Path(sys.argv[1]) / 'credential.bin')",
+                    "first = store.load_or_create()",
+                    "assert store.load() == first",
+                    "second = store.rotate()",
+                    "assert first != second",
+                    "assert store.load() == second",
+                    "store.remove()",
+                    "try:",
+                    "    store.load()",
+                    "except FileNotFoundError:",
+                    "    pass",
+                    "else:",
+                    "    raise AssertionError('removed credential remained readable')",
+                )
+            )
+            try:
+                completed = subprocess.run(
+                    [sys.executable, "-B", "-c", probe, temporary],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                self.fail("isolated Keychain round trip exceeded 20 seconds")
+            self.assertEqual(
+                completed.returncode,
+                0,
+                msg=f"stdout={completed.stdout!r} stderr={completed.stderr!r}",
+            )
 
 
 if __name__ == "__main__":

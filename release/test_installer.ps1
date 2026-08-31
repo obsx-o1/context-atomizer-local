@@ -32,6 +32,8 @@ $pythonExecutable = (Get-Command python -ErrorAction Stop).Source
 $runtimePackageRoot = Join-Path $Checkout 'src\atomizer_local_client'
 $fingerprintScript = 'import sys; from pathlib import Path; root = Path(sys.argv[1]).resolve(); sys.path.insert(0, str(root.parent)); from atomizer_local_client.runtime_health import runtime_build_fingerprint; print(runtime_build_fingerprint(root))'
 $fingerprintArguments = '-B -c "{0}" "{1}"' -f $fingerprintScript,$runtimePackageRoot
+$stage = 'source_fingerprint'
+Write-Host "Lifecycle stage: $stage"
 $fingerprintResult = Invoke-BoundedProcess -FilePath $pythonExecutable -ArgumentList $fingerprintArguments -TimeoutSeconds 30 -ReportFailure
 $expectedRuntimeBuildFingerprint = $fingerprintResult.StandardOutput.Trim()
 if ($fingerprintResult.ExitCode -ne 0 -or $expectedRuntimeBuildFingerprint -notmatch '^[0-9a-f]{64}$') {
@@ -112,6 +114,8 @@ $configBlocks = @($registrations | ForEach-Object {
 $configBlocks -join "`n" | Set-Content -LiteralPath $codexConfigPath -Encoding UTF8
 
 $installArguments = '/S /CHATGPT=1 /CODEX=1 /D={0}' -f $applicationDirectory
+$stage = 'fresh_install'
+Write-Host "Lifecycle stage: $stage"
 $installExit = Invoke-LeafProcess -FilePath $Installer -ArgumentList $installArguments -TimeoutSeconds 180 -ReportFailure
 $stage = 'installer_completed'
 if ($installExit -ne 0) { throw "Installer failed with exit code $installExit." }
@@ -160,6 +164,8 @@ if (@(Compare-Object -ReferenceObject $expectedPublicHealthProperties -Differenc
     throw 'Unauthenticated Library health exposed fields beyond the minimal availability contract.'
 }
 
+$stage = 'fresh_runtime_status'
+Write-Host "Lifecycle stage: $stage"
 $statusResult = Invoke-BoundedProcess -FilePath $manager -ArgumentList 'status' -TimeoutSeconds 5 -ReportFailure
 if ($statusResult.ExitCode -ne 0) { throw 'Installed manager status failed.' }
 $status = $statusResult.StandardOutput | ConvertFrom-Json
@@ -186,6 +192,8 @@ if ($runtimeHealth.runtime_build_fingerprint -ne $expectedRuntimeBuildFingerprin
 $runtimeProcess = Get-Process -Id $state.pid
 if ($runtimeProcess.MainWindowHandle -ne 0) { throw 'Installed runtime is not windowless.' }
 $securityArguments = '"{0}" fresh --data-directory "{1}" --receipt "{2}"' -f $securityAcceptanceHelper,$dataDirectory,$Receipt
+$stage = 'fresh_security_acceptance'
+Write-Host "Lifecycle stage: $stage"
 $securityResult = Invoke-BoundedProcess -FilePath $pythonExecutable -ArgumentList $securityArguments -TimeoutSeconds 30 -ReportFailure
 if ($securityResult.ExitCode -ne 0) { throw 'Fresh-install packaged security acceptance failed.' }
 $freshSecurity = $securityResult.StandardOutput | ConvertFrom-Json
@@ -255,6 +263,8 @@ $duplicateHooks = [ordered]@{
 }
 $duplicateHooks | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $duplicateHooksPath -Encoding UTF8
 $duplicateArguments = "install --enable-codex --codex-hooks `"$duplicateHooksPath`""
+$stage = 'duplicate_hook_reconciliation'
+Write-Host "Lifecycle stage: $stage"
 $duplicateExit = Invoke-LeafProcess -FilePath $manager -ArgumentList $duplicateArguments -TimeoutSeconds 30 -ReportFailure
 if ($duplicateExit -ne 0) { throw 'Installed manager could not reconcile duplicate current hooks.' }
 $duplicateHooks = Get-Content -LiteralPath $duplicateHooksPath -Raw | ConvertFrom-Json
@@ -277,6 +287,8 @@ $ambiguousHooks = [ordered]@{
 $ambiguousHooks | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ambiguousHooksPath -Encoding UTF8
 $ambiguousHashBefore = (Get-FileHash -LiteralPath $ambiguousHooksPath -Algorithm SHA256).Hash
 $ambiguousArguments = "install --enable-codex --codex-hooks `"$ambiguousHooksPath`""
+$stage = 'ambiguous_hook_rejection'
+Write-Host "Lifecycle stage: $stage"
 $ambiguousExit = Invoke-LeafProcess -FilePath $manager -ArgumentList $ambiguousArguments -TimeoutSeconds 30 -ReportFailure
 if ($ambiguousExit -eq 0) { throw 'Installed manager accepted an ambiguous Atomizer-like hook.' }
 $ambiguousHashAfter = (Get-FileHash -LiteralPath $ambiguousHooksPath -Algorithm SHA256).Hash
@@ -285,12 +297,16 @@ if ($ambiguousHashAfter -ne $ambiguousHashBefore) { throw 'ambiguous Codex hook 
 $emptyHooksPath = Join-Path $env:RUNNER_TEMP 'context-atomizer-empty-hooks.json'
 if (Test-Path -LiteralPath $emptyHooksPath) { throw 'Disposable no-hooks fixture already exists.' }
 $emptyHooksArguments = "install --enable-codex --codex-hooks `"$emptyHooksPath`""
+$stage = 'fresh_hook_registration'
+Write-Host "Lifecycle stage: $stage"
 $emptyHooksExit = Invoke-LeafProcess -FilePath $manager -ArgumentList $emptyHooksArguments -TimeoutSeconds 30 -ReportFailure
 if ($emptyHooksExit -ne 0) { throw 'Installed manager could not create a fresh Codex hooks file.' }
 $emptyHooks = Get-Content -LiteralPath $emptyHooksPath -Raw | ConvertFrom-Json
 if (@($emptyHooks.hooks.UserPromptSubmit).Count -ne 1 -or @($emptyHooks.hooks.Stop).Count -ne 1) {
     throw 'Fresh Codex hooks were not installed exactly once.'
 }
+$stage = 'repeated_hook_registration'
+Write-Host "Lifecycle stage: $stage"
 $repeatEmptyHooksExit = Invoke-LeafProcess -FilePath $manager -ArgumentList $emptyHooksArguments -TimeoutSeconds 30 -ReportFailure
 if ($repeatEmptyHooksExit -ne 0) { throw 'Installed manager could not repeat fresh Codex hook registration.' }
 $emptyHooks = Get-Content -LiteralPath $emptyHooksPath -Raw | ConvertFrom-Json
@@ -313,6 +329,8 @@ $preReinstallReady = Wait-RuntimeReady -StatePath $statePath -Manager $manager -
 $state = $preReinstallReady.State
 $health = $preReinstallReady.Health
 $derivedBeforeReinstall = $health.derived_state
+$stage = 'pre_reinstall_runtime_stop'
+Write-Host "Lifecycle stage: $stage"
 Stop-DisposableRuntime -Manager $manager -State $state
 $databasePhysicalShaBefore = (Get-FileHash -LiteralPath $database -Algorithm SHA256).Hash.ToLowerInvariant()
 $snapshotBefore = Get-LogicalSnapshot -Python $pythonExecutable -Helper $snapshotHelper -Database $database -TimeoutSeconds 30
@@ -338,6 +356,8 @@ foreach ($workspacePath in @($workspaceHooksPath, $secondWorkspaceHooksPath)) {
     $registeredHooks | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $workspacePath -Encoding UTF8
 }
 
+$stage = 'reinstall'
+Write-Host "Lifecycle stage: $stage"
 $reinstallExit = Invoke-LeafProcess -FilePath $Installer -ArgumentList $installArguments -TimeoutSeconds 180 -ReportFailure
 $stage = 'reinstall_completed'
 if ($reinstallExit -ne 0) { throw "Reinstall failed with exit code $reinstallExit." }
@@ -352,12 +372,16 @@ if ((Get-FileHash -LiteralPath $extensionCredential -Algorithm SHA256).Hash -ne 
     throw 'Ordinary reinstall rotated or replaced the paired extension secret.'
 }
 $postSecurityArguments = '"{0}" post-reinstall --data-directory "{1}" --receipt "{2}"' -f $securityAcceptanceHelper,$dataDirectory,$Receipt
+$stage = 'post_reinstall_security_acceptance'
+Write-Host "Lifecycle stage: $stage"
 $postSecurityResult = Invoke-BoundedProcess -FilePath $pythonExecutable -ArgumentList $postSecurityArguments -TimeoutSeconds 30 -ReportFailure
 if ($postSecurityResult.ExitCode -ne 0) { throw 'Post-reinstall packaged security acceptance failed.' }
 $postSecurity = $postSecurityResult.StandardOutput | ConvertFrom-Json
 if (-not $postSecurity.management_preserved -or -not $postSecurity.revoke_invalidated_old_secret) {
     throw 'Post-reinstall packaged security receipt was incomplete.'
 }
+$stage = 'post_reinstall_runtime_stop'
+Write-Host "Lifecycle stage: $stage"
 Stop-DisposableRuntime -Manager $manager -State $state
 $databasePhysicalShaAfter = (Get-FileHash -LiteralPath $database -Algorithm SHA256).Hash.ToLowerInvariant()
 $snapshotAfter = Get-LogicalSnapshot -Python $pythonExecutable -Helper $snapshotHelper -Database $database -TimeoutSeconds 30
@@ -399,6 +423,8 @@ try {
         Move-Item -LiteralPath $entry.FullName -Destination $renamedCheckout
         $movedCheckoutEntries += $entry.Name
     }
+    $stage = 'checkout_independent_restart'
+    Write-Host "Lifecycle stage: $stage"
     $restartExit = Invoke-LeafProcess -FilePath $manager -ArgumentList 'restart' -TimeoutSeconds 30 -ReportFailure
     if ($restartExit -ne 0) { throw 'Installed runtime could not restart without the checkout.' }
     $checkoutIndependentReady = Wait-RuntimeReady -StatePath $statePath -Manager $manager -MinimumUnitsIndexed 1 -TimeoutSeconds 30
@@ -432,6 +458,8 @@ if (-not (Test-Path -LiteralPath $database)) { throw 'Workspace uninstall delete
 $preUninstallReady = Wait-RuntimeReady -StatePath $statePath -Manager $manager -MinimumUnitsIndexed 1 -TimeoutSeconds 30
 $state = $preUninstallReady.State
 $health = $preUninstallReady.Health
+$stage = 'pre_uninstall_runtime_stop'
+Write-Host "Lifecycle stage: $stage"
 Stop-DisposableRuntime -Manager $manager -State $state
 $snapshotBeforeUninstall = Get-LogicalSnapshot -Python $pythonExecutable -Helper $snapshotHelper -Database $database -TimeoutSeconds 30
 
@@ -449,6 +477,8 @@ if ($registeredQuietUninstallString -notmatch ' -EncodedCommand ') {
 New-Item -ItemType Directory -Path $applicationSiblingDirectory | Out-Null
 $applicationSiblingMarker = Join-Path $applicationSiblingDirectory 'must-remain.txt'
 'unrelated sibling' | Set-Content -LiteralPath $applicationSiblingMarker -Encoding UTF8
+$stage = 'quiet_uninstall'
+Write-Host "Lifecycle stage: $stage"
 $quietUninstallSuccess = Invoke-RegisteredQuietUninstall `
     -Command $registeredQuietUninstallString `
     -ApplicationDirectory $applicationDirectory

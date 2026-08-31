@@ -13,7 +13,25 @@ from typing import Iterator, Protocol
 
 
 _ERR_SEC_ITEM_NOT_FOUND = -25300
+_GENERIC_PASSWORD_ITEM_CLASS = 0x67656E70
+_SERVICE_ATTRIBUTE = 0x73766365
+_ACCOUNT_ATTRIBUTE = 0x61636374
 _SERVICE = "com.contextatomizer.local.credentials"
+
+
+class _SecKeychainAttribute(ctypes.Structure):
+    _fields_ = [
+        ("tag", ctypes.c_uint32),
+        ("length", ctypes.c_uint32),
+        ("data", ctypes.c_void_p),
+    ]
+
+
+class _SecKeychainAttributeList(ctypes.Structure):
+    _fields_ = [
+        ("count", ctypes.c_uint32),
+        ("attr", ctypes.POINTER(_SecKeychainAttribute)),
+    ]
 
 
 class KeychainBackend(Protocol):
@@ -57,17 +75,16 @@ class SecurityFrameworkKeychain:
             ctypes.POINTER(pointer),
         ]
         self.security.SecKeychainFindGenericPassword.restype = ctypes.c_int32
-        self.security.SecKeychainAddGenericPassword.argtypes = [
+        self.security.SecKeychainItemCreateFromContent.argtypes = [
+            ctypes.c_uint32,
+            ctypes.POINTER(_SecKeychainAttributeList),
+            length,
             pointer,
-            length,
-            ctypes.c_char_p,
-            length,
-            ctypes.c_char_p,
-            length,
+            pointer,
             pointer,
             ctypes.POINTER(pointer),
         ]
-        self.security.SecKeychainAddGenericPassword.restype = ctypes.c_int32
+        self.security.SecKeychainItemCreateFromContent.restype = ctypes.c_int32
         self.security.SecKeychainItemModifyAttributesAndData.argtypes = [
             pointer,
             pointer,
@@ -228,30 +245,36 @@ class SecurityFrameworkKeychain:
             return
         service_bytes = service.encode("utf-8")
         account_bytes = account.encode("utf-8")
+        service_data = ctypes.create_string_buffer(service_bytes)
+        account_data = ctypes.create_string_buffer(account_bytes)
+        attributes = (_SecKeychainAttribute * 2)(
+            _SecKeychainAttribute(
+                _SERVICE_ATTRIBUTE,
+                len(service_bytes),
+                ctypes.cast(service_data, ctypes.c_void_p),
+            ),
+            _SecKeychainAttribute(
+                _ACCOUNT_ATTRIBUTE,
+                len(account_bytes),
+                ctypes.cast(account_data, ctypes.c_void_p),
+            ),
+        )
+        attribute_list = _SecKeychainAttributeList(len(attributes), attributes)
         item = ctypes.c_void_p()
         with self._keychain() as keychain, self._access(
             account, trusted_executables
         ) as access:
-            status = self.security.SecKeychainAddGenericPassword(
-                keychain,
-                len(service_bytes),
-                service_bytes,
-                len(account_bytes),
-                account_bytes,
+            status = self.security.SecKeychainItemCreateFromContent(
+                _GENERIC_PASSWORD_ITEM_CLASS,
+                ctypes.byref(attribute_list),
                 len(payload),
                 ctypes.cast(data, ctypes.c_void_p),
+                keychain,
+                access,
                 ctypes.byref(item),
             )
             self._check(status, "create")
-            try:
-                self._check(
-                    self.security.SecKeychainItemSetAccess(item, access),
-                    "access assignment",
-                )
-            except BaseException:
-                self.security.SecKeychainItemDelete(item)
-                raise
-            finally:
+            if item.value:
                 self.core_foundation.CFRelease(item)
 
     def remove(self, service: str, account: str) -> None:
