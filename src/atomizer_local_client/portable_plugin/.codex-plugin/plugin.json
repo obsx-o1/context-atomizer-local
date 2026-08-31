@@ -1,0 +1,32 @@
+{
+  "name": "context-atomizer-local-library",
+  "version": "0.1.0-dev0",
+  "description": "Bounded read-only retrieval from an existing local Context Atomizer Library.",
+  "author": {
+    "name": "Context Atomizer"
+  },
+  "repository": "https://github.com/obsx-o1/context-atomizer-local",
+  "license": "MPL-2.0",
+  "keywords": [
+    "local-memory",
+    "library",
+    "mcp",
+    "read-only"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./openai.mcp.json",
+  "interface": {
+    "displayName": "Context Atomizer Local Library",
+    "shortDescription": "Read bounded context from your local Library.",
+    "longDescription": "Search and read bounded, provenance-preserving context from the existing local Library.",
+    "developerName": "Context Atomizer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Search my local Library for relevant context.",
+      "Show recent context from my local Library."
+    ]
+  }
+}
