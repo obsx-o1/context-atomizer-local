@@ -34,7 +34,7 @@ def build_package(browser: str, output_directory: Path) -> Path:
     if output_directory.exists() and any(output_directory.iterdir()):
         raise FileExistsError("output directory must be empty")
     output_directory.mkdir(parents=True, exist_ok=True)
-    for relative in (Path("core"), Path("browsers/shared")):
+    for relative in (Path("core"), Path("browsers/shared"), Path("browsers/claude")):
         target = output_directory / relative
         shutil.copytree(source_root / relative, target)
     manifest_source = source_root / "browsers" / browser / "manifest.json"

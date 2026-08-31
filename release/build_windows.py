@@ -98,6 +98,7 @@ def build_installer(
         "atomizer-local-manager.exe",
         "atomizer-local-open-library.exe",
         "atomizer-codex-hook.exe",
+        "atomizer-claude-hook.exe",
     }
     present = {path.name for path in runtime_directory.glob("*.exe")}
     if not required.issubset(present):

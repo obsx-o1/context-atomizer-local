@@ -15,6 +15,7 @@ EXECUTABLES = (
     ("atomizer-local-manager", "manager.py", False),
     ("atomizer-local-open-library", "open_library.py", True),
     ("atomizer-codex-hook", "codex_hook.py", False),
+    ("atomizer-claude-hook", "claude_hook.py", False),
 )
 
 

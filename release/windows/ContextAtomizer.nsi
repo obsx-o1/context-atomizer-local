@@ -110,6 +110,7 @@ Section "Core application" SEC_CORE
   File "${SourceDir}\atomizer-local-manager.exe"
   File "${SourceDir}\atomizer-local-open-library.exe"
   File "${SourceDir}\atomizer-codex-hook.exe"
+  File "${SourceDir}\atomizer-claude-hook.exe"
 
   CreateDirectory "$SMPROGRAMS\Context Atomizer Local"
   CreateShortCut "$SMPROGRAMS\Context Atomizer Local\Context Atomizer Library.lnk" "$INSTDIR\atomizer-local-open-library.exe" "" "$INSTDIR\atomizer-local-open-library.exe"
@@ -144,6 +145,13 @@ Section /o "Enable Codex capture" SEC_CODEX
   WriteRegDWORD HKCU "Software\ContextAtomizer\Installer" "Codex" 1
 SectionEnd
 
+Section /o "Enable Claude Code capture" SEC_CLAUDE
+  Push "install --enable-claude --claude-settings $\"$PROFILE\.claude\settings.json$\""
+  Push "Claude Code capture could not be enabled."
+  Call RunManagerStep
+  WriteRegDWORD HKCU "Software\ContextAtomizer\Installer" "ClaudeCode" 1
+SectionEnd
+
 Function .onInit
   Call RequireX64CompatibleWindows
   SetShellVarContext current
@@ -153,6 +161,9 @@ Function .onInit
   ReadRegDWORD $0 HKCU "Software\ContextAtomizer\Installer" "Codex"
   StrCmp $0 "1" 0 +2
     !insertmacro SelectSection ${SEC_CODEX}
+  ReadRegDWORD $0 HKCU "Software\ContextAtomizer\Installer" "ClaudeCode"
+  StrCmp $0 "1" 0 +2
+    !insertmacro SelectSection ${SEC_CLAUDE}
 
   ${GetParameters} $R0
   ClearErrors
@@ -163,13 +174,21 @@ Function .onInit
   ${GetOptions} $R0 "/CODEX=" $R1
   StrCmp $R1 "1" 0 +2
     !insertmacro SelectSection ${SEC_CODEX}
+  ClearErrors
+  ${GetOptions} $R0 "/CLAUDE=" $R1
+  StrCmp $R1 "1" 0 +2
+    !insertmacro SelectSection ${SEC_CLAUDE}
 FunctionEnd
 
 Section "Uninstall"
   SetShellVarContext current
   IfFileExists "$INSTDIR\atomizer-local-manager.exe" 0 cleanup_launch_failed
   ClearErrors
-  ExecWait '"$INSTDIR\atomizer-local-manager.exe" uninstall --codex-hooks "$PROFILE\.codex\hooks.json" --codex-config "$PROFILE\.codex\config.toml"' $0
+  StrCpy $R2 ""
+  ReadRegDWORD $1 HKCU "Software\ContextAtomizer\Installer" "ClaudeCode"
+  StrCmp $1 "1" 0 +2
+    StrCpy $R2 ' --claude-settings "$PROFILE\.claude\settings.json"'
+  ExecWait '"$INSTDIR\atomizer-local-manager.exe" uninstall --codex-hooks "$PROFILE\.codex\hooks.json" --codex-config "$PROFILE\.codex\config.toml"$R2' $0
   IfErrors cleanup_launch_failed
   StrCmp $0 "0" cleanup_files
   StrCmp $0 "2" cleanup_ambiguous cleanup_error
@@ -195,6 +214,7 @@ cleanup_files:
   Delete "$INSTDIR\atomizer-local-manager.exe"
   Delete "$INSTDIR\atomizer-local-open-library.exe"
   Delete "$INSTDIR\atomizer-codex-hook.exe"
+  Delete "$INSTDIR\atomizer-claude-hook.exe"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ContextAtomizerLocal"
