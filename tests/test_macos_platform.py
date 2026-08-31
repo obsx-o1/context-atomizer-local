@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import io
 import json
@@ -23,6 +24,7 @@ from test_support import PACKAGE_ROOT
 from atomizer_local_client.platforms.macos.browser import open_url
 from atomizer_local_client.platforms.macos.keychain import (
     MacOSKeychainCredentialStore,
+    SecurityFrameworkKeychain,
 )
 from atomizer_local_client.platforms.macos.launch_agent import (
     LABEL,
@@ -167,6 +169,29 @@ class MacOSPlatformTests(unittest.TestCase):
             set(backend.last_trusted_executables),
             {manager.resolve(), runtime.resolve()},
         )
+
+    def test_keychain_rotation_preserves_creation_time_access(self) -> None:
+        backend = SecurityFrameworkKeychain.__new__(SecurityFrameworkKeychain)
+        backend.security = mock.Mock()
+        backend.security.SecKeychainItemModifyAttributesAndData.return_value = 0
+        backend.core_foundation = mock.Mock()
+        item = ctypes.c_void_p(42)
+        backend._find = mock.Mock(return_value=(b"old", item))
+
+        with mock.patch.object(
+            backend,
+            "_access",
+            side_effect=AssertionError("rotation attempted to replace the Keychain ACL"),
+        ) as access:
+            backend.store("service", "account", b"new", (Path(sys.executable),))
+
+        access.assert_not_called()
+        call = backend.security.SecKeychainItemModifyAttributesAndData.call_args
+        self.assertIs(call.args[0], item)
+        self.assertIsNone(call.args[1])
+        self.assertEqual(call.args[2], 3)
+        self.assertEqual(ctypes.string_at(call.args[3], 3), b"new")
+        backend.core_foundation.CFRelease.assert_called_once_with(item)
 
     def test_credential_selector_uses_keychain_only_for_macos(self) -> None:
         from atomizer_local_client.platforms.credentials import current_credential_store

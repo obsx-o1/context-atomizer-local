@@ -19,6 +19,10 @@ remain the same implementation used on Windows.
   developer's normal Keychain. Keychain ACLs trust only the current executable
   and the installed manager/runtime siblings so the two runtime processes can
   share their separated credentials without broadening access to other apps.
+  Because development artifacts are unsigned, replacing an executable can
+  change its code identity and make an existing ACL stale. That experimental
+  upgrade case requires user-assisted credential repair; the runtime does not
+  weaken or silently replace an existing ACL.
 - Login startup uses one exactly owned user LaunchAgent at
   `~/Library/LaunchAgents/com.contextatomizer.local.runtime.plist`. It does not
   install a LaunchDaemon or system service and requires no root privileges.
@@ -55,6 +59,10 @@ These interfaces and labels were checked on 2026-08-31:
 - [Apple DTS Keychain ACL guidance](https://developer.apple.com/forums/thread/836816):
   setting access while creating an item avoids the authorization prompt that
   can accompany a later ACL change.
+- [Apple Code Signing Guide](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/AboutCS/AboutCS.html):
+  Keychain access recognizes updated applications through their code-signing
+  designated requirement; unsigned development replacements do not have that
+  stable signed identity.
 - [Apple Launch Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html):
   per-user background processes use `launchd`; the user's `Library/LaunchAgents`
   directory is loaded at login, and `Label` plus `ProgramArguments` are the
