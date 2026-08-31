@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ntpath
+import os
+import posixpath
 import shlex
 from dataclasses import dataclass
 from enum import Enum
@@ -56,7 +58,7 @@ def parse_hook_command(command: Any) -> HookCommandIdentity | None:
     try:
         tokens = tuple(
             _strip_balanced_quotes(token)
-            for token in shlex.split(command, posix=False)
+            for token in shlex.split(command, posix=os.name != "nt")
         )
     except ValueError:
         return None
@@ -65,12 +67,14 @@ def parse_hook_command(command: Any) -> HookCommandIdentity | None:
     return HookCommandIdentity(tokens[0], tokens[1:])
 
 
-def _normalize_windows_path(value: str) -> str:
-    return ntpath.normcase(ntpath.normpath(value.replace("/", "\\")))
+def _normalize_path(value: str) -> str:
+    if os.name == "nt":
+        return ntpath.normcase(ntpath.normpath(value.replace("/", "\\")))
+    return posixpath.normpath(value)
 
 
 def _entrypoint_name(executable: str) -> str:
-    return ntpath.basename(_normalize_windows_path(executable)).casefold()
+    return ntpath.basename(executable.replace("/", "\\")).casefold()
 
 
 def _has_atomizer_marker(command: Any) -> bool:
@@ -89,8 +93,8 @@ def _has_expected_arguments(
         and len(current.arguments) == 2
         and candidate.arguments[0] == "--database"
         and current.arguments[0] == "--database"
-        and _normalize_windows_path(candidate.arguments[1])
-        == _normalize_windows_path(current.arguments[1])
+        and _normalize_path(candidate.arguments[1])
+        == _normalize_path(current.arguments[1])
     )
 
 
@@ -124,8 +128,8 @@ def classify_codex_hook(
     expected_arguments = _has_expected_arguments(candidate, current)
     if (
         expected_arguments
-        and _normalize_windows_path(candidate.executable)
-        == _normalize_windows_path(current.executable)
+        and _normalize_path(candidate.executable)
+        == _normalize_path(current.executable)
     ):
         return HookOwnership.CURRENT_ATOMIZER
 

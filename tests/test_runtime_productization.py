@@ -40,6 +40,7 @@ from atomizer_local_client.runtime.configuration import (
     read_state,
     write_json,
 )
+from atomizer_local_client.platforms.credentials import current_credential_store
 from atomizer_local_client.runtime.credentials import CredentialStore
 from atomizer_local_client.runtime.lifecycle import LifecycleManager, RuntimeProcessLauncher
 from atomizer_local_client.runtime.permissions import PermissionStore
@@ -351,7 +352,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(bootstrap_status, 404)
         self.assertEqual(bootstrap, {"ok": False})
-        management_token = CredentialStore(self.paths.credential).load()
+        management_token = current_credential_store(self.paths.credential).load()
         wrong_status, _ = self._json_request(
             f"http://127.0.0.1:{bridge_port}/v1/library/launch",
             data=b"{}",
@@ -421,7 +422,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(pair_status, 200)
         extension_secret = str(paired["extensionSecret"])
-        extension_store = CredentialStore(
+        extension_store = current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         )
@@ -438,7 +439,9 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         second = self.manager.install()
         self.assertTrue(second["running"])
         self.assertEqual(len(self.launcher.processes), launches)
-        self.assertEqual(management_token, CredentialStore(self.paths.credential).load())
+        self.assertEqual(
+            management_token, current_credential_store(self.paths.credential).load()
+        )
 
         crashed_pid = int(read_state(self.paths.state)["pid"])
         crashed_process = self.launcher.processes[-1]
@@ -509,11 +512,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             str(list_elected_sources(self.paths.database)[0]["source_id"]), original_source_id
         )
 
-        old_token = CredentialStore(self.paths.credential).load()
+        old_token = current_credential_store(self.paths.credential).load()
         rotated = self.manager.rotate_credential()
         self.assertTrue(rotated["running"])
         rotated_state = read_state(self.paths.state)
-        new_token = CredentialStore(self.paths.credential).load()
+        new_token = current_credential_store(self.paths.credential).load()
         self.assertNotEqual(new_token, old_token)
         old_status, _ = self._json_request(
             f"http://127.0.0.1:{rotated_state['bridge_port']}/v1/management/status",
@@ -712,6 +715,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         finally:
             runtime.stop()
 
+    @unittest.skipUnless(sys.platform == "win32", "requires Windows DPAPI")
     def test_dpapi_credential_is_stable_rotatable_and_not_plaintext_at_rest(self) -> None:
         store = CredentialStore(self.paths.credential)
         token = store.load_or_create()
@@ -865,7 +869,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             self.paths.database,
             chat_event(event_id="preserved-on-partial-uninstall", content="preserved"),
         )
-        CredentialStore(
+        current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         ).rotate()
