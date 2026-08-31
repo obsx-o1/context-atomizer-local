@@ -101,8 +101,6 @@ class SecurityFrameworkKeychain:
         self.security.SecTrustedApplicationCreateFromPath.restype = ctypes.c_int32
         self.security.SecAccessCreate.argtypes = [pointer, pointer, ctypes.POINTER(pointer)]
         self.security.SecAccessCreate.restype = ctypes.c_int32
-        self.security.SecKeychainItemSetAccess.argtypes = [pointer, pointer]
-        self.security.SecKeychainItemSetAccess.restype = ctypes.c_int32
         self.security.SecKeychainItemFreeContent.argtypes = [pointer, pointer]
         self.security.SecKeychainItemFreeContent.restype = ctypes.c_int32
         self.core_foundation.CFStringCreateWithCString.argtypes = [
@@ -231,15 +229,10 @@ class SecurityFrameworkKeychain:
         if found is not None:
             _, item = found
             try:
-                with self._access(account, trusted_executables) as access:
-                    self._check(
-                        self.security.SecKeychainItemSetAccess(item, access),
-                        "access update",
-                    )
-                    status = self.security.SecKeychainItemModifyAttributesAndData(
-                        item, None, len(payload), ctypes.cast(data, ctypes.c_void_p)
-                    )
-                    self._check(status, "update")
+                status = self.security.SecKeychainItemModifyAttributesAndData(
+                    item, None, len(payload), ctypes.cast(data, ctypes.c_void_p)
+                )
+                self._check(status, "update")
             finally:
                 self.core_foundation.CFRelease(item)
             return

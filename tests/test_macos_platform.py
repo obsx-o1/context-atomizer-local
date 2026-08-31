@@ -5,6 +5,7 @@ import io
 import json
 import os
 import plistlib
+import signal
 import shutil
 import sqlite3
 import stat
@@ -527,6 +528,9 @@ class MacOSNativeKeychainTests(unittest.TestCase):
             self.skipTest("isolated CI keychain is not configured")
         self.assertTrue(Path(isolated).is_file())
         with tempfile.TemporaryDirectory() as temporary:
+            stage_path = Path(temporary) / "keychain-stage.txt"
+            stdout_path = Path(temporary) / "keychain-stdout.txt"
+            stderr_path = Path(temporary) / "keychain-stderr.txt"
             probe = "\n".join(
                 (
                     "import sys",
@@ -534,35 +538,64 @@ class MacOSNativeKeychainTests(unittest.TestCase):
                     "from atomizer_local_client.platforms.macos.keychain import (",
                     "    MacOSKeychainCredentialStore,",
                     ")",
+                    "stage = Path(sys.argv[2])",
+                    "stage.write_text('construct', encoding='utf-8')",
                     "store = MacOSKeychainCredentialStore(Path(sys.argv[1]) / 'credential.bin')",
+                    "stage.write_text('load_or_create', encoding='utf-8')",
                     "first = store.load_or_create()",
+                    "stage.write_text('load_existing', encoding='utf-8')",
                     "assert store.load() == first",
+                    "stage.write_text('rotate', encoding='utf-8')",
                     "second = store.rotate()",
                     "assert first != second",
+                    "stage.write_text('load_rotated', encoding='utf-8')",
                     "assert store.load() == second",
+                    "stage.write_text('remove', encoding='utf-8')",
                     "store.remove()",
+                    "stage.write_text('verify_removed', encoding='utf-8')",
                     "try:",
                     "    store.load()",
                     "except FileNotFoundError:",
                     "    pass",
                     "else:",
                     "    raise AssertionError('removed credential remained readable')",
+                    "stage.write_text('complete', encoding='utf-8')",
                 )
             )
-            try:
-                completed = subprocess.run(
-                    [sys.executable, "-B", "-c", probe, temporary],
-                    capture_output=True,
+            with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open(
+                "w", encoding="utf-8"
+            ) as stderr:
+                process = subprocess.Popen(
+                    [sys.executable, "-B", "-c", probe, temporary, stage_path],
+                    stdout=stdout,
+                    stderr=stderr,
+                    start_new_session=True,
                     text=True,
-                    timeout=20,
-                    check=False,
                 )
-            except subprocess.TimeoutExpired:
-                self.fail("isolated Keychain round trip exceeded 20 seconds")
+                try:
+                    returncode = process.wait(timeout=20)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=5)
+                    stage = (
+                        stage_path.read_text(encoding="utf-8")
+                        if stage_path.is_file()
+                        else "before-stage-receipt"
+                    )
+                    self.fail(
+                        f"isolated Keychain round trip exceeded 20 seconds at {stage}"
+                    )
             self.assertEqual(
-                completed.returncode,
+                returncode,
                 0,
-                msg=f"stdout={completed.stdout!r} stderr={completed.stderr!r}",
+                msg=(
+                    f"stage={stage_path.read_text(encoding='utf-8')!r} "
+                    f"stdout={stdout_path.read_text(encoding='utf-8')!r} "
+                    f"stderr={stderr_path.read_text(encoding='utf-8')!r}"
+                ),
             )
 
 

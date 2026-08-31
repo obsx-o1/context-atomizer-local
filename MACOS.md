@@ -2,10 +2,10 @@
 
 Context Atomizer Local has an experimental macOS user-runtime foundation for
 Apple Silicon (`arm64`) and Intel (`x86_64`). Native GitHub-hosted CI validation
-is configured but has not yet run for this branch. It has not completed a human
-host smoke test, is not signed, and is not notarized. This is not a claim of
-full macOS support. CI artifacts are uploaded only after their native test and
-packaged-lifecycle steps pass.
+runs on both architectures, and merge eligibility requires both native lanes to
+pass. It has not completed a human host smoke test, is not signed, and is not
+notarized. This is not a claim of full macOS support. CI artifacts are uploaded
+only after their native test and packaged-lifecycle steps pass.
 
 The macOS layer changes only operating-system boundaries. Capture, Library,
 SQLite, migrations, retrieval, pairing, HMAC/replay, and local security policy
@@ -48,9 +48,13 @@ These interfaces and labels were checked on 2026-08-31:
 - [Apple `SecAccessCreate`](https://developer.apple.com/documentation/security/secaccesscreate%28_%3A_%3A_%3A%29):
   the trusted-application list controls which applications may access a
   sensitive Keychain item; a `nil` list trusts only the calling application.
-- [Apple `SecKeychainItemSetAccess`](https://developer.apple.com/documentation/security/seckeychainitemsetaccess%28_%3A_%3A%29):
-  an explicit access instance can be attached to a Keychain item after it is
-  created.
+- [Apple `SecKeychainItemCreateFromContent`](https://developer.apple.com/documentation/security/1393225-seckeychainitemcreatefromcontent?changes=_3_1___9_2&language=objc):
+  the initial access instance is installed atomically when the Keychain item is
+  created. Credential rotation modifies only the item's payload and preserves
+  that creation-time access policy.
+- [Apple DTS Keychain ACL guidance](https://developer.apple.com/forums/thread/836816):
+  setting access while creating an item avoids the authorization prompt that
+  can accompany a later ACL change.
 - [Apple Launch Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html):
   per-user background processes use `launchd`; the user's `Library/LaunchAgents`
   directory is loaded at login, and `Label` plus `ProgramArguments` are the
