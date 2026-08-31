@@ -13,6 +13,7 @@
       this.adapter = options.adapter;
       this.routeProvider = options.routeProvider;
       this.send = options.send;
+      this.host = options.host || "chatgpt_web";
       this.now = options.now || (() => Date.now());
       this.schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
       const cryptoValue = options.crypto || globalThis.crypto;
@@ -96,6 +97,7 @@
             }
           : route;
         const event = types.makeChatEvent({
+          host: this.host,
           ...captureRoute,
           role: "user",
           content,
@@ -145,6 +147,7 @@
           if (association.ignoredAssistantReferences.has(message.reference)) continue;
           if (!this.assistantTracker.observe(message, now)) continue;
           const emitted = this.emit(types.makeChatEvent({
+            host: this.host,
             ...association.route,
             role: "assistant",
             content: message.content,
@@ -188,6 +191,7 @@
         ? { ...route, projectDisplayName: pending.projectDisplayName }
         : route;
       const rebound = types.makeChatEvent({
+        host: this.host,
         ...reboundRoute,
         role: pending.event.role,
         content: pending.event.content,
@@ -345,5 +349,5 @@
     }
   }
 
-  return { ChatGPTCapture };
+  return { ChatGPTCapture, WebCapture: ChatGPTCapture };
 });

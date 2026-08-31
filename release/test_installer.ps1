@@ -118,10 +118,10 @@ if ($installExit -ne 0) { throw "Installer failed with exit code $installExit." 
 
 $requiredFiles = @($runtime, $manager, $hook, (Join-Path $applicationDirectory 'atomizer-local-open-library.exe'))
 foreach ($path in $requiredFiles) { if (-not (Test-Path -LiteralPath $path)) { throw "Missing installed file: $path" } }
-$expectedExecutableNames = @('atomizer-local-runtime.exe','atomizer-local-manager.exe','atomizer-local-open-library.exe','atomizer-codex-hook.exe','Uninstall.exe')
+$expectedExecutableNames = @('atomizer-local-runtime.exe','atomizer-local-manager.exe','atomizer-local-open-library.exe','atomizer-codex-hook.exe','atomizer-claude-hook.exe','Uninstall.exe')
 $actualExecutableNames = @(Get-ChildItem -LiteralPath $applicationDirectory -File -Filter '*.exe' | Select-Object -ExpandProperty Name | Sort-Object)
 if (@(Compare-Object -ReferenceObject ($expectedExecutableNames | Sort-Object) -DifferenceObject $actualExecutableNames).Count -ne 0) {
-    throw 'Installed executable inventory is not exactly four product executables plus Uninstall.exe.'
+    throw 'Installed executable inventory is not exactly five product executables plus Uninstall.exe.'
 }
 if (-not (Test-Path -LiteralPath $startMenu)) { throw 'Start Menu Library shortcut was not created.' }
 if (-not (Get-ItemProperty -LiteralPath $runKey -Name 'ContextAtomizerLocal' -ErrorAction SilentlyContinue)) {

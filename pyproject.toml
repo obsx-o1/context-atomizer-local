@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 atomizer-codex-hook = "atomizer_local_client.hosts.codex.hook_entrypoint:main"
+atomizer-claude-hook = "atomizer_local_client.hosts.claude_code.hook_entrypoint:main"
 atomizer-local = "atomizer_local_client.runtime.lifecycle:main"
 atomizer-local-mcp = "atomizer_local_client.mcp.server:main"
 

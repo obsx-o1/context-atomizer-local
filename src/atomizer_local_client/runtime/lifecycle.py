@@ -15,6 +15,10 @@ import ctypes
 from pathlib import Path
 from typing import Any, Protocol
 
+from atomizer_local_client.runtime.claude_integration import (
+    install_claude_hooks,
+    remove_claude_hooks,
+)
 from atomizer_local_client.runtime.codex_integration import (
     codex_hook_file_has_atomizer_entries,
     codex_hook_file_is_empty,
@@ -58,6 +62,13 @@ def _hook_executable() -> Path:
     executable = Path(sys.executable).resolve().parent / "atomizer-codex-hook.exe"
     if not executable.is_file():
         raise RuntimeError("the packaged Codex hook executable is not installed")
+    return executable
+
+
+def _claude_hook_executable() -> Path:
+    executable = Path(sys.executable).resolve().parent / "atomizer-claude-hook.exe"
+    if not executable.is_file():
+        raise RuntimeError("the packaged Claude hook executable is not installed")
     return executable
 
 
@@ -160,6 +171,8 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
         chatgpt_enabled: bool | None = None,
     ) -> dict[str, object]:
         self.paths.app_data.mkdir(parents=True, exist_ok=True)
@@ -190,6 +203,16 @@ class LifecycleManager:
             )
             self.permission_store.set_codex_installed(True)
             self.permission_store.set_enabled("codex", True)
+        claude_changed = False
+        if claude_settings is not None:
+            claude_changed = install_claude_hooks(
+                claude_settings,
+                claude_hook_executable or _claude_hook_executable(),
+                self.paths.database,
+                self.paths.permissions,
+            )
+            self.permission_store.set_claude_code_installed(True)
+            self.permission_store.set_enabled("claude_code", True)
         if start and not self.status()["running"]:
             self.process_launcher.launch(self._command())
             self.wait_for_running()
@@ -200,6 +223,7 @@ class LifecycleManager:
             "codex_hooks_changed": codex_changed,
             "codex_workspace_targets": codex_workspace_targets,
             "codex_hook_changed_paths": codex_changed_paths,
+            "claude_hooks_changed": claude_changed,
             "database_preserved": self.paths.database.exists(),
             "permissions": {
                 name: permission.enabled
@@ -305,6 +329,8 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
     ) -> dict[str, Any]:
         codex_changed = False
         codex_workspace_targets = 0
@@ -323,6 +349,16 @@ class LifecycleManager:
             )
             self.permission_store.set_codex_installed(True)
             self.permission_store.set_enabled("codex", True)
+        claude_changed = False
+        if claude_settings is not None:
+            claude_changed = install_claude_hooks(
+                claude_settings,
+                claude_hook_executable or _claude_hook_executable(),
+                self.paths.database,
+                self.paths.permissions,
+            )
+            self.permission_store.set_claude_code_installed(True)
+            self.permission_store.set_enabled("claude_code", True)
         if read_state(self.paths.state) is not None:
             self.stop()
         command = runtime_startup_command(self.runtime_command_prefix, self.paths.config)
@@ -336,6 +372,7 @@ class LifecycleManager:
             "codex_hooks_changed": codex_changed,
             "codex_workspace_targets": codex_workspace_targets,
             "codex_hook_changed_paths": codex_changed_paths,
+            "claude_hooks_changed": claude_changed,
         }
 
     def rotate_credential(self) -> dict[str, object]:
@@ -351,6 +388,8 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
     ) -> dict[str, object]:
         if read_state(self.paths.state) is not None:
             self.stop()
@@ -398,6 +437,20 @@ class LifecycleManager:
                         f"hook_target:{type(error).__name__}"
                     )
             codex_changed = codex_changed_paths > 0
+        claude_changed = False
+        claude_cleanup_warnings: list[str] = []
+        if claude_settings is not None:
+            try:
+                claude_changed = remove_claude_hooks(
+                    claude_settings,
+                    claude_hook_executable or _claude_hook_executable(),
+                    self.paths.database,
+                    self.paths.permissions,
+                )
+            except Exception as error:
+                claude_cleanup_warnings.append(
+                    f"hook_target:{type(error).__name__}"
+                )
         self.startup.remove()
         self.credential_store.remove()
         CredentialStore(
@@ -426,6 +479,9 @@ class LifecycleManager:
             "codex_hook_changed_paths": codex_changed_paths,
             "codex_cleanup_complete": not codex_cleanup_warnings,
             "codex_cleanup_warnings": tuple(codex_cleanup_warnings),
+            "claude_hooks_changed": claude_changed,
+            "claude_cleanup_complete": not claude_cleanup_warnings,
+            "claude_cleanup_warnings": tuple(claude_cleanup_warnings),
         }
 
     def open_library(self) -> bool:
@@ -475,9 +531,11 @@ def main() -> int:
         ),
     )
     parser.add_argument("--enable-codex", action="store_true")
+    parser.add_argument("--enable-claude", action="store_true")
     parser.add_argument("--enable-chatgpt", action="store_true")
     parser.add_argument("--codex-hooks", type=Path, default=None)
     parser.add_argument("--codex-config", type=Path, default=None)
+    parser.add_argument("--claude-settings", type=Path, default=None)
     arguments = parser.parse_args()
     manager = _manager()
     codex_path = arguments.codex_hooks
@@ -486,16 +544,28 @@ def main() -> int:
     codex_config = arguments.codex_config
     if codex_path is not None and codex_config is None:
         codex_config = codex_path.parent / "config.toml"
+    claude_settings = arguments.claude_settings
+    if arguments.enable_claude and claude_settings is None:
+        claude_settings = Path.home() / ".claude" / "settings.json"
     if arguments.command == "install":
         result = manager.install(
             codex_hooks=codex_path,
             codex_config=codex_config,
+            claude_settings=claude_settings,
             chatgpt_enabled=True if arguments.enable_chatgpt else None,
         )
     elif arguments.command == "update":
-        result = manager.update(codex_hooks=codex_path, codex_config=codex_config)
+        result = manager.update(
+            codex_hooks=codex_path,
+            codex_config=codex_config,
+            claude_settings=claude_settings,
+        )
     elif arguments.command == "uninstall":
-        result = manager.uninstall(codex_hooks=codex_path, codex_config=codex_config)
+        result = manager.uninstall(
+            codex_hooks=codex_path,
+            codex_config=codex_config,
+            claude_settings=claude_settings,
+        )
     elif arguments.command == "start":
         result = manager.start()
     elif arguments.command == "stop":
@@ -510,6 +580,8 @@ def main() -> int:
         result = {"opened": manager.open_library()}
     print(json.dumps(result, indent=2, sort_keys=True))
     if arguments.command == "uninstall" and not result.get("codex_cleanup_complete", True):
+        return 2
+    if arguments.command == "uninstall" and not result.get("claude_cleanup_complete", True):
         return 2
     return 0
 

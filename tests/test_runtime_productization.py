@@ -629,7 +629,12 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
     def test_install_permission_choices_persist_and_repeated_install_does_not_reset_them(self) -> None:
         first = self.manager.install(start=False, chatgpt_enabled=True)
         self.assertEqual(
-            first["permissions"], {"chatgpt_web": True, "codex": False}
+            first["permissions"],
+            {
+                "chatgpt_web": True,
+                "codex": False,
+                "claude_code": False,
+            },
         )
         hooks = self.root / "workspace" / ".codex" / "hooks.json"
         executable = self.root / "atomizer-codex-hook.exe"
@@ -646,6 +651,36 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         preserved = PermissionStore(self.paths.permissions)
         self.assertTrue(preserved.is_enabled("chatgpt_web"))
         self.assertTrue(preserved.is_enabled("codex"))
+
+    def test_claude_lifecycle_is_independent_and_preserves_unrelated_hooks(self) -> None:
+        settings = self.root / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({
+            "theme": "dark",
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
+        }), encoding="utf-8")
+        executable = self.root / "atomizer-claude-hook.exe"
+        installed = self.manager.install(
+            start=False,
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertTrue(installed["claude_hooks_changed"])
+        self.assertFalse((self.root / ".codex" / "hooks.json").exists())
+        self.assertTrue(PermissionStore(self.paths.permissions).is_enabled("claude_code"))
+        updated = self.manager.update(
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertFalse(updated["claude_hooks_changed"])
+        removed = self.manager.uninstall(
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertTrue(removed["claude_hooks_changed"])
+        value = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertEqual(value["theme"], "dark")
+        self.assertEqual(value["hooks"]["Stop"][0]["hooks"][0]["command"], "notify")
 
     def test_bridge_port_squatting_fails_closed_without_fallback(self) -> None:
         from atomizer_local_client.runtime.application import AtomizerLocalRuntime

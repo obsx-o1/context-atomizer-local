@@ -11,6 +11,8 @@ from typing import Any, Mapping
 class Host(StrEnum):
     CODEX = "codex"
     CHATGPT_WEB = "chatgpt_web"
+    CLAUDE_CODE = "claude_code"
+    CLAUDE_WEB = "claude_web"
 
 
 class Role(StrEnum):
@@ -62,7 +64,7 @@ class ChatEvent:
                 self.rebind_from_host_chat_reference,
                 "rebind_from_host_chat_reference",
             )
-            if self.host != Host.CHATGPT_WEB:
+            if self.host != Host.CHATGPT_WEB and self.host != Host.CLAUDE_WEB:
                 raise ValueError("only ChatGPT-web chats can be provisionally rebound")
             if self.role != Role.USER or self.host_turn_reference is None:
                 raise ValueError("only an identified user submission can rebind a provisional chat")
