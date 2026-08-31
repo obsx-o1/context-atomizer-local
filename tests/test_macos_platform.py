@@ -198,9 +198,10 @@ class MacOSPlatformTests(unittest.TestCase):
         backend.security = mock.Mock()
         backend.core_foundation = mock.Mock()
         backend._cf_type_array_callbacks = ctypes.c_int(0)
+        trusted_paths = []
 
         def create_trusted_application(path, reference) -> int:
-            del path
+            trusted_paths.append(path)
             reference._obj.value = 11
             return 0
 
@@ -222,6 +223,7 @@ class MacOSPlatformTests(unittest.TestCase):
         callbacks = backend.core_foundation.CFArrayCreate.call_args.args[3]
         self.assertIsNotNone(callbacks)
         self.assertEqual(callbacks._obj.value, 0)
+        self.assertEqual(trusted_paths, [None])
 
     def test_credential_selector_uses_keychain_only_for_macos(self) -> None:
         from atomizer_local_client.platforms.credentials import current_credential_store

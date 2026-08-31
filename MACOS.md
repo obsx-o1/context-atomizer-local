@@ -19,6 +19,8 @@ remain the same implementation used on Windows.
   developer's normal Keychain. Keychain ACLs trust only the current executable
   and the installed manager/runtime siblings so the two runtime processes can
   share their separated credentials without broadening access to other apps.
+  The current process is represented by Keychain Services' native calling-tool
+  identity; installed sibling executables remain explicit paths.
   Because development artifacts are unsigned, replacing an executable can
   change its code identity and make an existing ACL stale. That experimental
   upgrade case requires user-assisted credential repair; the runtime does not
@@ -52,6 +54,9 @@ These interfaces and labels were checked on 2026-08-31:
 - [Apple `SecAccessCreate`](https://developer.apple.com/documentation/security/secaccesscreate%28_%3A_%3A_%3A%29):
   the trusted-application list controls which applications may access a
   sensitive Keychain item; a `nil` list trusts only the calling application.
+- [Apple `SecTrustedApplicationCreateFromPath`](https://developer.apple.com/documentation/security/sectrustedapplicationcreatefrompath%28_%3A_%3A%29):
+  a trusted-application object binds an ACL entry to the designated executable;
+  the nullable path represents the application or tool making the call.
 - [Apple `SecKeychainItemCreateFromContent`](https://developer.apple.com/documentation/security/1393225-seckeychainitemcreatefromcontent?changes=_3_1___9_2&language=objc):
   the initial access instance is installed atomically when the Keychain item is
   created. Credential rotation modifies only the item's payload and preserves

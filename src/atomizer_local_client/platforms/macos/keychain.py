@@ -188,10 +188,12 @@ class SecurityFrameworkKeychain:
         array_ref = ctypes.c_void_p()
         access_ref = ctypes.c_void_p()
         try:
+            current_executable = Path(sys.executable).resolve()
             for path in trusted_executables:
                 application = ctypes.c_void_p()
                 status = self.security.SecTrustedApplicationCreateFromPath(
-                    os.fsencode(path), ctypes.byref(application)
+                    None if path.resolve() == current_executable else os.fsencode(path),
+                    ctypes.byref(application),
                 )
                 self._check(status, "trusted application creation")
                 trusted.append(application)
