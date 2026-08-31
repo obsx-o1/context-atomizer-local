@@ -1023,6 +1023,8 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
                 f"Write-LifecycleReceipt -Path $Receipt -Scenario '{scenario}' -Passed $true",
                 script,
             )
+            self.assertIn(f"Write-Output 'LIFECYCLE_RESULT {scenario}=PASS'", script)
+            self.assertNotIn("Get-Content -LiteralPath $Receipt -Raw", script)
         diagnostic = (
             PACKAGE_ROOT / "release" / "codex_workspace_diagnostic.py"
         ).read_text(encoding="utf-8")

@@ -200,4 +200,4 @@ $evidence += @{
 Remove-Item -LiteralPath $applicationSiblingDirectory -Recurse -Force
 $stage = 'complete'
 Write-LifecycleReceipt -Path $Receipt -Scenario 'ambiguous' -Passed $true -Stage $stage -Candidate $candidate -Evidence $evidence
-Get-Content -LiteralPath $Receipt -Raw
+Write-Output 'LIFECYCLE_RESULT ambiguous=PASS'

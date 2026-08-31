@@ -94,4 +94,4 @@ $evidence += @{
 }
 $stage = 'complete'
 Write-LifecycleReceipt -Path $Receipt -Scenario 'failure' -Passed $true -Stage $stage -Candidate $candidate -Evidence $evidence
-Get-Content -LiteralPath $Receipt -Raw
+Write-Output 'LIFECYCLE_RESULT failure=PASS'

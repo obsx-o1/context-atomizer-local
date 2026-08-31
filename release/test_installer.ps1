@@ -556,4 +556,4 @@ $evidence = @{
 if (-not $evidence.source_runtime_equal -or -not $evidence.pre_post_equal) { throw 'Normal lifecycle identity or preservation equality failed.' }
 $stage = 'complete'
 Write-LifecycleReceipt -Path $Receipt -Scenario 'normal' -Passed $true -Stage $stage -Candidate $candidate -Evidence $evidence
-Get-Content -LiteralPath $Receipt -Raw
+Write-Output 'LIFECYCLE_RESULT normal=PASS'
