@@ -259,6 +259,9 @@ jobs:
       - name: Audit repository content
         run: python tools/repository_audit.py .
 
+      - name: Run bounded native Keychain preflight
+        run: python -B -m unittest discover -s tests -p 'test_macos_platform.py' -k isolated_ci_keychain_round_trip -v
+
       - name: Run Python regression with isolated Keychain
         run: python -B -m unittest discover -s tests -v
 
@@ -359,6 +362,9 @@ jobs:
 
       - name: Audit repository content
         run: python tools/repository_audit.py .
+
+      - name: Run bounded native Keychain preflight
+        run: python -B -m unittest discover -s tests -p 'test_macos_platform.py' -k isolated_ci_keychain_round_trip -v
 
       - name: Run Python regression with isolated Keychain
         run: python -B -m unittest discover -s tests -v

@@ -610,6 +610,11 @@ class MacOSNativeKeychainTests(unittest.TestCase):
                         if stage_path.is_file()
                         else "before-stage-receipt"
                     )
+                    print(
+                        f"KEYCHAIN_STAGE_TIMEOUT={stage}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                     self.fail(
                         f"isolated Keychain round trip exceeded 20 seconds at {stage}"
                     )
