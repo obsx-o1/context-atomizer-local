@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -129,6 +130,7 @@ class CodexHookCompatibilityTests(unittest.TestCase):
         self.assertFalse(remove_codex_hooks(self.path, self.current))
         self.assertEqual(self.path.read_bytes(), first)
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows path identity")
     def test_windows_case_slash_and_quoting_normalization_identifies_current(self) -> None:
         executable = str(self.executable.resolve()).upper().replace("\\", "/")
         database = str(self.database.resolve()).upper().replace("\\", "/")
@@ -137,6 +139,28 @@ class CodexHookCompatibilityTests(unittest.TestCase):
             classify_codex_hook("Stop", {"type": "command", "command": command}, self.current),
             HookOwnership.CURRENT_ATOMIZER,
         )
+
+    def test_posix_hook_identity_is_case_sensitive(self) -> None:
+        current = (
+            "'/Applications/Context Atomizer/atomizer-codex-hook' "
+            "--database '/Users/synthetic/Library/Application Support/Context Atomizer/history.sqlite3'"
+        )
+        exact = {"type": "command", "command": current}
+        different_case = {
+            "type": "command",
+            "command": current.replace("Context Atomizer", "context atomizer"),
+        }
+        with mock.patch(
+            "atomizer_local_client.runtime.codex_hook_ownership.os.name", "posix"
+        ):
+            self.assertIs(
+                classify_codex_hook("Stop", exact, current),
+                HookOwnership.CURRENT_ATOMIZER,
+            )
+            self.assertIs(
+                classify_codex_hook("Stop", different_case, current),
+                HookOwnership.AMBIGUOUS,
+            )
 
     def test_malformed_config_and_atomic_failure_preserve_original_bytes(self) -> None:
         for label, raw in (

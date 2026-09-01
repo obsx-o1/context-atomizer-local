@@ -419,7 +419,11 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                 self.server.permission_store.set_enabled(
                     integration, enabled_text == "yes"
                 )
-                label = "ChatGPT Web" if integration == "chatgpt_web" else "Codex"
+                label = {
+                    "chatgpt_web": "ChatGPT Web",
+                    "codex": "Codex",
+                    "claude_code": "Claude Code",
+                }.get(integration, integration)
                 state = "enabled" if enabled_text == "yes" else "disabled"
                 self._redirect(
                     "/permissions",

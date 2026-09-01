@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,6 +20,8 @@ def _atomic_write(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_bytes(payload)
+    if sys.platform == "darwin":
+        os.chmod(temporary, 0o600)
     os.replace(temporary, path)
 
 
@@ -57,6 +60,15 @@ class RuntimePaths:
 
     @classmethod
     def current_user(cls) -> "RuntimePaths":
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.paths import (
+                current_user_locations,
+            )
+
+            locations = current_user_locations()
+            return cls.for_root(
+                locations.app_data, shortcut=locations.library_shortcut
+            )
         local = os.environ.get("LOCALAPPDATA")
         roaming = os.environ.get("APPDATA")
         if not local or not roaming:

@@ -24,15 +24,17 @@
   }
 
   function makeChatEvent(input) {
+    const host = input.host || "chatgpt_web";
+    if (host !== "chatgpt_web" && host !== "claude_web") throw new Error("unsupported host");
     const hostChatReference = requiredText(input.hostChatReference, "hostChatReference");
     const role = requiredText(input.role, "role");
     if (role !== "user" && role !== "assistant") throw new Error("unsupported role");
     const content = requiredText(input.content, "content");
     const messageReference = requiredText(input.messageReference, "messageReference");
-    const material = ["chatgpt_web", hostChatReference, messageReference, role, content].join("\u001f");
+    const material = [host, hostChatReference, messageReference, role, content].join("\u001f");
     const event = {
-      event_id: "chatgpt-web-" + stableHash(material),
-      host: "chatgpt_web",
+      event_id: host.replaceAll("_", "-") + "-" + stableHash(material),
+      host,
       host_project_reference: input.hostProjectReference || null,
       host_chat_reference: hostChatReference,
       host_turn_reference: messageReference,

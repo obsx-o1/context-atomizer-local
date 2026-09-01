@@ -1,0 +1,1 @@
+"""macOS user-runtime adapters."""

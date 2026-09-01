@@ -22,6 +22,7 @@ EXPECTED_CONTENT_SEQUENCE = [
 EXPECTED_HOST_PERMISSIONS = [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://claude.ai/*",
     "http://127.0.0.1:43117/*",
 ]
 
@@ -82,8 +83,8 @@ class SupportedClientValidationTests(unittest.TestCase):
             for path in (PACKAGE_ROOT / "browser_extension" / "browsers").iterdir()
             if path.is_dir() and path.name != "shared"
         )
-        self.assertEqual(host_adapters, ["codex"])
-        self.assertEqual(browser_shells, ["chromium", "firefox"])
+        self.assertEqual(host_adapters, ["claude_code", "codex"])
+        self.assertEqual(browser_shells, ["chromium", "claude", "firefox"])
 
         module_path = PACKAGE_ROOT / "browser_extension" / "package_extension.py"
         specification = importlib.util.spec_from_file_location("package_extension_under_test", module_path)

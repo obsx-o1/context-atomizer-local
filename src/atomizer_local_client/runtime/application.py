@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from atomizer_local_client.runtime.configuration import (
     remove_state,
     write_json,
 )
-from atomizer_local_client.runtime.credentials import CredentialStore
+from atomizer_local_client.platforms.credentials import current_credential_store
 from atomizer_local_client.runtime.logging_setup import (
     close_runtime_logging,
     configure_runtime_logging,
@@ -122,13 +123,15 @@ class AtomizerLocalRuntime:
         config.validate()
         self.paths = paths
         self.config = config
-        self.credential_store = credential_store or CredentialStore(paths.credential)
+        self.credential_store = credential_store or current_credential_store(
+            paths.credential
+        )
         self.runtime_identity = runtime_identity or RuntimeIdentity()
         self._test_bridge_port = _test_bridge_port
         self.extension_state = ExtensionConnectionState()
         self.permission_store = PermissionStore(paths.permissions)
         self.pairing_authority = ExtensionPairingAuthority(
-            CredentialStore(
+            current_credential_store(
                 paths.extension_credential,
                 description="Context Atomizer Local extension pairing secret",
             )
@@ -152,8 +155,15 @@ class AtomizerLocalRuntime:
         return tuple(range(preferred, min(65535, preferred + span) + 1))
 
     def _bind_bridge(self) -> LocalIngressServer:
+        server_type = LocalIngressServer
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.loopback_servers import (
+                MacOSLocalIngressServer,
+            )
+
+            server_type = MacOSLocalIngressServer
         try:
-            return LocalIngressServer(
+            return server_type(
                 self.paths.database,
                 str(self._token),
                 self.pairing_authority,
@@ -172,12 +182,19 @@ class AtomizerLocalRuntime:
             ) from exc
 
     def _bind_library(self, bridge_port: int) -> LibraryViewServer:
+        server_type = LibraryViewServer
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.loopback_servers import (
+                MacOSLibraryViewServer,
+            )
+
+            server_type = MacOSLibraryViewServer
         last_error: OSError | None = None
         for port in self._port_candidates(self.config.library_port, self.config.port_span):
             if port == bridge_port:
                 continue
             try:
-                return LibraryViewServer(
+                return server_type(
                     self.paths.database,
                     port,
                     maintenance_interval_seconds=self.config.maintenance_interval_seconds,
@@ -215,7 +232,14 @@ class AtomizerLocalRuntime:
         self._instance_lock.acquire()
         self._owns_instance = True
         try:
-            self.paths.app_data.mkdir(parents=True, exist_ok=True)
+            if sys.platform == "darwin":
+                from atomizer_local_client.platforms.macos.permissions import (
+                    ensure_private_directory,
+                )
+
+                ensure_private_directory(self.paths.app_data)
+            else:
+                self.paths.app_data.mkdir(parents=True, exist_ok=True)
             self._token = self.credential_store.load_or_create()
             with database(self.paths.database):
                 pass

@@ -1,0 +1,6 @@
+{
+  "context-atomizer-local-library": {
+    "command": "atomizer-local-mcp",
+    "args": []
+  }
+}

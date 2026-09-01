@@ -98,10 +98,14 @@ def build_installer(
         "atomizer-local-manager.exe",
         "atomizer-local-open-library.exe",
         "atomizer-codex-hook.exe",
+        "atomizer-claude-hook.exe",
+        "atomizer-local-mcp.exe",
     }
     present = {path.name for path in runtime_directory.glob("*.exe")}
     if not required.issubset(present):
         raise FileNotFoundError(f"missing runtime executables: {sorted(required - present)}")
+    if not (runtime_directory / "portable_plugin" / "plugin.json").is_file():
+        raise FileNotFoundError("missing portable Agent Plugin payload")
     quiet_payload = quiet_uninstall_command(project_root)
     quiet_registry_command = quiet_uninstall_registry_command(project_root)
     if len(quiet_registry_command) >= _NSIS_MAX_STRING_LENGTH:

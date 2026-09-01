@@ -40,6 +40,8 @@ from atomizer_local_client.runtime.configuration import (
     read_state,
     write_json,
 )
+from atomizer_local_client.platforms.credentials import current_credential_store
+import atomizer_local_client.runtime.lifecycle as lifecycle_module
 from atomizer_local_client.runtime.credentials import CredentialStore
 from atomizer_local_client.runtime.lifecycle import LifecycleManager, RuntimeProcessLauncher
 from atomizer_local_client.runtime.permissions import PermissionStore
@@ -74,29 +76,122 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
     def __init__(self) -> None:
         self.processes: list[subprocess.Popen[bytes]] = []
         self.creationflags: list[int] = []
+        self.stage_paths: list[Path] = []
         self.runtime_identity_root: Path | None = None
 
     def launch(self, command: list[str]) -> subprocess.Popen[bytes]:
         config_path = Path(command[-1])
+        stage_path = config_path.parent / f"test-runtime-stage-{len(self.processes)}.txt"
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(SOURCE_ROOT)
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        probe = "\n".join(
+            (
+                "import sys",
+                "import socket",
+                "from contextlib import contextmanager",
+                "from pathlib import Path",
+                "import atomizer_local_client.runtime.application as application_module",
+                "from atomizer_local_client.runtime.application import AtomizerLocalRuntime",
+                "from atomizer_local_client.runtime.configuration import RuntimeConfig, RuntimePaths",
+                "from atomizer_local_client.runtime_health import RuntimeIdentity",
+                "p = Path(sys.argv[1])",
+                "stage = Path(sys.argv[3])",
+                "stage.write_text('construct', encoding='utf-8')",
+                "try:",
+                "    identity = RuntimeIdentity(Path(sys.argv[2])) if sys.argv[2] else None",
+                "    runtime = AtomizerLocalRuntime(",
+                "        RuntimePaths.for_root(p.parent),",
+                "        RuntimeConfig.load(p),",
+                "        runtime_identity=identity,",
+                "        _test_bridge_port=0,",
+                "    )",
+                "    def traced(name, function):",
+                "        def call(*args, **kwargs):",
+                "            stage.write_text(name, encoding='utf-8')",
+                "            result = function(*args, **kwargs)",
+                "            stage.write_text(f'{name}_done', encoding='utf-8')",
+                "            return result",
+                "        return call",
+                "    runtime._instance_lock.acquire = traced(",
+                "        'instance_lock', runtime._instance_lock.acquire",
+                "    )",
+                "    runtime.credential_store.load_or_create = traced(",
+                "        'management_credential', runtime.credential_store.load_or_create",
+                "    )",
+                "    runtime._bind_bridge = traced('bridge_bind', runtime._bind_bridge)",
+                "    runtime._bind_library = traced('library_bind', runtime._bind_library)",
+                "    socket.getfqdn = traced('bridge_reverse_lookup', socket.getfqdn)",
+                "    application_module.LocalIngressServer.server_bind = traced(",
+                "        'bridge_server_bind', application_module.LocalIngressServer.server_bind",
+                "    )",
+                "    application_module.LocalIngressServer.server_activate = traced(",
+                "        'bridge_activate', application_module.LocalIngressServer.server_activate",
+                "    )",
+                "    original_database = application_module.database",
+                "    @contextmanager",
+                "    def traced_database(path):",
+                "        stage.write_text('database_open', encoding='utf-8')",
+                "        with original_database(path) as connection:",
+                "            stage.write_text('database_open_done', encoding='utf-8')",
+                "            yield connection",
+                "        stage.write_text('database_close_done', encoding='utf-8')",
+                "    application_module.database = traced_database",
+                "    application_module.write_json = traced(",
+                "        'state_write', application_module.write_json",
+                "    )",
+                "    stage.write_text('credential_load', encoding='utf-8')",
+                "    runtime.credential_store.load_or_create()",
+                "    stage.write_text('runtime_start', encoding='utf-8')",
+                "    runtime.start()",
+                "    runtime._instance_lock.release = traced(",
+                "        'instance_unlock', runtime._instance_lock.release",
+                "    )",
+                "    application_module.remove_state = traced(",
+                "        'state_remove', application_module.remove_state",
+                "    )",
+                "    application_module.close_runtime_logging = traced(",
+                "        'logging_close', application_module.close_runtime_logging",
+                "    )",
+                "    for server_name, server in (",
+                "        ('library', runtime.library_server),",
+                "        ('bridge', runtime.bridge_server),",
+                "    ):",
+                "        server.shutdown = traced(f'{server_name}_shutdown', server.shutdown)",
+                "        server.server_close = traced(",
+                "            f'{server_name}_close', server.server_close",
+                "        )",
+                "    stage.write_text('running', encoding='utf-8')",
+                "    runtime.wait()",
+                "    stage.write_text('stopping', encoding='utf-8')",
+                "    runtime.stop()",
+                "    stage.write_text('complete', encoding='utf-8')",
+                "except BaseException as error:",
+                "    message = str(error)",
+                "    category = 'unclassified'",
+                "    for marker, label in ((",
+                "        'Keychain', 'keychain'),",
+                "        ('bridge', 'bridge'),",
+                "        ('Library port', 'library'),",
+                "        ('already running', 'instance_lock'),",
+                "    ):",
+                "        if marker in message:",
+                "            category = label",
+                "            break",
+                "    stage.write_text(",
+                "        f'error:{type(error).__name__}:{category}', encoding='utf-8'",
+                "    )",
+                "    raise",
+            )
+        )
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
-                (
-                    "import sys; from pathlib import Path; "
-                    "from atomizer_local_client.runtime.application import AtomizerLocalRuntime; "
-                    "from atomizer_local_client.runtime.configuration import RuntimeConfig, RuntimePaths; "
-                    "from atomizer_local_client.runtime_health import RuntimeIdentity; "
-                    "p=Path(sys.argv[1]); identity=RuntimeIdentity(Path(sys.argv[2])) if sys.argv[2] else None; "
-                    "r=AtomizerLocalRuntime(RuntimePaths.for_root(p.parent), RuntimeConfig.load(p), "
-                    "runtime_identity=identity, _test_bridge_port=0); "
-                    "r.start(); r.wait(); r.stop()"
-                ),
+                probe,
                 str(config_path),
                 str(self.runtime_identity_root) if self.runtime_identity_root else "",
+                str(stage_path),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -108,13 +203,64 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
         )
         self.processes.append(process)
         self.creationflags.append(flags)
+        self.stage_paths.append(stage_path)
         return process
+
+    def last_diagnostics(self) -> tuple[str, bool]:
+        if not self.processes:
+            return "not-launched", False
+        stage_path = self.stage_paths[-1]
+        stage = (
+            stage_path.read_text(encoding="utf-8")
+            if stage_path.is_file()
+            else "before-stage-receipt"
+        )
+        return stage, self.processes[-1].poll() is not None
 
     def cleanup(self) -> None:
         for process in self.processes:
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=5)
+
+
+class _DiagnosticLifecycleManager(LifecycleManager):
+    def wait_for_running(self, *, timeout: float = 8.0) -> dict[str, object]:
+        try:
+            return super().wait_for_running(timeout=timeout)
+        except RuntimeError as error:
+            launcher = self.process_launcher
+            if not isinstance(launcher, ManagedChildLauncher):
+                raise
+            stage, exited = launcher.last_diagnostics()
+            raise RuntimeError(
+                f"{error}; test_child_stage={stage}; test_child_exited={exited}"
+            ) from error
+
+    def stop(self, *, timeout: float = 8.0) -> bool:
+        launcher = self.process_launcher
+        if not isinstance(launcher, ManagedChildLauncher):
+            return super().stop(timeout=timeout)
+        fallback = lifecycle_module._process_is_running
+
+        def managed_child_is_running(pid: int) -> bool:
+            for process in launcher.processes:
+                if process.pid == pid:
+                    return process.poll() is None
+            return fallback(pid)
+
+        try:
+            with patch.object(
+                lifecycle_module,
+                "_process_is_running",
+                side_effect=managed_child_is_running,
+            ):
+                return super().stop(timeout=timeout)
+        except RuntimeError as error:
+            stage, exited = launcher.last_diagnostics()
+            raise RuntimeError(
+                f"{error}; test_child_stage={stage}; test_child_exited={exited}"
+            ) from error
 
 
 class FakeRegistryKey:
@@ -177,7 +323,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.startup = FakeStartup()
         self.launcher = ManagedChildLauncher()
         self.runtime_executable = self.root / "installed" / "atomizer-local-runtime.exe"
-        self.manager = LifecycleManager(
+        self.manager = _DiagnosticLifecycleManager(
             self.paths,
             startup=self.startup,
             runtime_command_prefix=[str(self.runtime_executable)],
@@ -351,7 +497,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(bootstrap_status, 404)
         self.assertEqual(bootstrap, {"ok": False})
-        management_token = CredentialStore(self.paths.credential).load()
+        management_token = current_credential_store(self.paths.credential).load()
         wrong_status, _ = self._json_request(
             f"http://127.0.0.1:{bridge_port}/v1/library/launch",
             data=b"{}",
@@ -421,7 +567,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(pair_status, 200)
         extension_secret = str(paired["extensionSecret"])
-        extension_store = CredentialStore(
+        extension_store = current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         )
@@ -431,14 +577,18 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(capture_status, 200)
         self.assertTrue(capture["ok"])
-        management_blob = self.paths.credential.read_bytes()
-        extension_blob = self.paths.extension_credential.read_bytes()
+        management_credential = current_credential_store(
+            self.paths.credential
+        ).load()
+        extension_credential = extension_store.load()
 
         launches = len(self.launcher.processes)
         second = self.manager.install()
         self.assertTrue(second["running"])
         self.assertEqual(len(self.launcher.processes), launches)
-        self.assertEqual(management_token, CredentialStore(self.paths.credential).load())
+        self.assertEqual(
+            management_token, current_credential_store(self.paths.credential).load()
+        )
 
         crashed_pid = int(read_state(self.paths.state)["pid"])
         crashed_process = self.launcher.processes[-1]
@@ -464,8 +614,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         after_restart_pid = int(read_state(self.paths.state)["pid"])
         self.assertTrue(restarted["running"])
         self.assertNotEqual(before_restart_pid, after_restart_pid)
-        self.assertEqual(self.paths.credential.read_bytes(), management_blob)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(
+            current_credential_store(self.paths.credential).load(),
+            management_credential,
+        )
+        self.assertEqual(extension_store.load(), extension_credential)
         restarted_state = read_state(self.paths.state)
         self.assertEqual(restarted_state["runtime_build"], old_identity)
         restarted_status = self.manager.status()
@@ -497,8 +650,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             current_identity,
         )
         self.assertFalse(updated_status["health"]["runtime"]["restart_required"])
-        self.assertEqual(self.paths.credential.read_bytes(), management_blob)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(
+            current_credential_store(self.paths.credential).load(),
+            management_credential,
+        )
+        self.assertEqual(extension_store.load(), extension_credential)
         update_capture_status, _ = self._signed_capture(
             int(after_update["bridge_port"]),
             extension_secret,
@@ -509,11 +665,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             str(list_elected_sources(self.paths.database)[0]["source_id"]), original_source_id
         )
 
-        old_token = CredentialStore(self.paths.credential).load()
+        old_token = current_credential_store(self.paths.credential).load()
         rotated = self.manager.rotate_credential()
         self.assertTrue(rotated["running"])
         rotated_state = read_state(self.paths.state)
-        new_token = CredentialStore(self.paths.credential).load()
+        new_token = current_credential_store(self.paths.credential).load()
         self.assertNotEqual(new_token, old_token)
         old_status, _ = self._json_request(
             f"http://127.0.0.1:{rotated_state['bridge_port']}/v1/management/status",
@@ -527,7 +683,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             headers={"Authorization": f"Bearer {new_token}"},
         )
         self.assertEqual(new_status, 200)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(extension_store.load(), extension_credential)
 
         self.manager.stop()
         database_bytes = self.paths.database.read_bytes()
@@ -539,6 +695,10 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.assertFalse(self.paths.config.exists())
         self.assertFalse(self.paths.credential.exists())
         self.assertFalse(self.paths.extension_credential.exists())
+        with self.assertRaises(FileNotFoundError):
+            current_credential_store(self.paths.credential).load()
+        with self.assertRaises(FileNotFoundError):
+            extension_store.load()
         self.assertFalse(self.paths.library_shortcut.exists())
 
     def test_derived_convergence_poll_tolerates_transient_missing_health(self) -> None:
@@ -629,7 +789,12 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
     def test_install_permission_choices_persist_and_repeated_install_does_not_reset_them(self) -> None:
         first = self.manager.install(start=False, chatgpt_enabled=True)
         self.assertEqual(
-            first["permissions"], {"chatgpt_web": True, "codex": False}
+            first["permissions"],
+            {
+                "chatgpt_web": True,
+                "codex": False,
+                "claude_code": False,
+            },
         )
         hooks = self.root / "workspace" / ".codex" / "hooks.json"
         executable = self.root / "atomizer-codex-hook.exe"
@@ -646,6 +811,36 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         preserved = PermissionStore(self.paths.permissions)
         self.assertTrue(preserved.is_enabled("chatgpt_web"))
         self.assertTrue(preserved.is_enabled("codex"))
+
+    def test_claude_lifecycle_is_independent_and_preserves_unrelated_hooks(self) -> None:
+        settings = self.root / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_text(json.dumps({
+            "theme": "dark",
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify"}]}]},
+        }), encoding="utf-8")
+        executable = self.root / "atomizer-claude-hook.exe"
+        installed = self.manager.install(
+            start=False,
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertTrue(installed["claude_hooks_changed"])
+        self.assertFalse((self.root / ".codex" / "hooks.json").exists())
+        self.assertTrue(PermissionStore(self.paths.permissions).is_enabled("claude_code"))
+        updated = self.manager.update(
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertFalse(updated["claude_hooks_changed"])
+        removed = self.manager.uninstall(
+            claude_settings=settings,
+            claude_hook_executable=executable,
+        )
+        self.assertTrue(removed["claude_hooks_changed"])
+        value = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertEqual(value["theme"], "dark")
+        self.assertEqual(value["hooks"]["Stop"][0]["hooks"][0]["command"], "notify")
 
     def test_bridge_port_squatting_fails_closed_without_fallback(self) -> None:
         from atomizer_local_client.runtime.application import AtomizerLocalRuntime
@@ -677,6 +872,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         finally:
             runtime.stop()
 
+    @unittest.skipUnless(sys.platform == "win32", "requires Windows DPAPI")
     def test_dpapi_credential_is_stable_rotatable_and_not_plaintext_at_rest(self) -> None:
         store = CredentialStore(self.paths.credential)
         token = store.load_or_create()
@@ -830,7 +1026,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             self.paths.database,
             chat_event(event_id="preserved-on-partial-uninstall", content="preserved"),
         )
-        CredentialStore(
+        current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         ).rotate()

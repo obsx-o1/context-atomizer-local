@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-_SUPPORTED_INTEGRATIONS = ("chatgpt_web", "codex")
+_SUPPORTED_INTEGRATIONS = ("chatgpt_web", "codex", "claude_code")
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +33,7 @@ class PermissionStore:
             "integrations": {
                 "chatgpt_web": {"enabled": False},
                 "codex": {"enabled": False, "installed": False},
+                "claude_code": {"enabled": False, "installed": False},
             },
         }
 
@@ -54,6 +55,8 @@ class PermissionStore:
             normalized["integrations"][name]["enabled"] = value["enabled"]
             if name == "codex" and isinstance(value.get("installed"), bool):
                 normalized["integrations"][name]["installed"] = value["installed"]
+            if name == "claude_code" and isinstance(value.get("installed"), bool):
+                normalized["integrations"][name]["installed"] = value["installed"]
         return normalized
 
     def _write(self, payload: dict[str, Any]) -> None:
@@ -74,6 +77,10 @@ class PermissionStore:
                 "codex": IntegrationPermission(
                     enabled=bool(payload["codex"]["enabled"]),
                     installed=bool(payload["codex"]["installed"]),
+                ),
+                "claude_code": IntegrationPermission(
+                    enabled=bool(payload["claude_code"]["enabled"]),
+                    installed=bool(payload["claude_code"]["installed"]),
                 ),
             }
 
@@ -98,4 +105,12 @@ class PermissionStore:
         with self._lock:
             payload = self._read()
             payload["integrations"]["codex"]["installed"] = installed
+            self._write(payload)
+
+    def set_claude_code_installed(self, installed: bool) -> None:
+        if not isinstance(installed, bool):
+            raise ValueError("installed must be a boolean")
+        with self._lock:
+            payload = self._read()
+            payload["integrations"]["claude_code"]["installed"] = installed
             self._write(payload)

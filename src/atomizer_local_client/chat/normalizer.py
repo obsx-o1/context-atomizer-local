@@ -77,9 +77,27 @@ def normalize_chatgpt_web(payload: Mapping[str, Any]) -> ChatEvent:
     return ChatEvent.from_mapping(normalized)
 
 
+def normalize_claude_web(payload: Mapping[str, Any]) -> ChatEvent:
+    normalized = dict(payload)
+    normalized["host"] = Host.CLAUDE_WEB.value
+    if not normalized.get("captured_at"):
+        normalized["captured_at"] = utc_now()
+    if not normalized.get("event_id"):
+        normalized["event_id"] = _identifier(
+            Host.CLAUDE_WEB.value,
+            _text(normalized.get("host_chat_reference"), "host_chat_reference"),
+            str(normalized.get("host_turn_reference") or ""),
+            _text(normalized.get("role"), "role"),
+            _text(normalized.get("content"), "content"),
+        )
+    return ChatEvent.from_mapping(normalized)
+
+
 def normalize_host_event(payload: Mapping[str, Any]) -> ChatEvent | None:
     if payload.get("hook_event_name"):
         return normalize_codex_hook(payload)
     if payload.get("host") == Host.CHATGPT_WEB.value:
         return normalize_chatgpt_web(payload)
+    if payload.get("host") == Host.CLAUDE_WEB.value:
+        return normalize_claude_web(payload)
     raise ValueError("unknown host capture event")

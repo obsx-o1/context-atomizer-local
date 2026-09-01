@@ -39,7 +39,13 @@ code.path { overflow-wrap: anywhere; }
 
 
 def _host_label(host: str) -> str:
-    return {"codex": "Codex", "chatgpt_web": "ChatGPT Web", "local": "Local"}.get(host, host)
+    return {
+        "codex": "Codex",
+        "chatgpt_web": "ChatGPT Web",
+        "claude_code": "Claude Code",
+        "claude_web": "Claude Web",
+        "local": "Local",
+    }.get(host, host)
 
 
 def _url(path: str, **parameters: str) -> str:
@@ -148,6 +154,9 @@ def render_permissions(
     paired = bool(extension.get("paired"))
     browser = "Paired" if paired else "Not paired"
     codex_hook = "Installed" if integrations["codex"].installed else "Not installed"
+    claude_hook = (
+        "Installed" if integrations["claude_code"].installed else "Not installed"
+    )
     status_html = f"<p class='status'>{escape(status)}</p>" if status else ""
     pairing_code_html = (
         "<p>Paste this one-time code into the extension options page within five minutes:</p>"
@@ -169,11 +178,12 @@ def render_permissions(
     )
     content = (
         "<h1>Permissions &amp; sources</h1>"
-        "<p>Permissions stay on this computer. Enable an integration once to capture supported future activity automatically.</p>"
+        "<p>Permissions stay on this computer. Enable an integration once to capture supported future activity automatically. The ChatGPT Web browser permission also governs Claude Web capture through the same paired extension.</p>"
         + status_html
         + "<section class='grid'>"
         + integration_card("chatgpt_web", "ChatGPT Web", "Browser", browser)
         + integration_card("codex", "Codex", "Hook", codex_hook)
+        + integration_card("claude_code", "Claude Code", "Hook", claude_hook)
         + "</section>"
         + pairing_controls
         + "<section class='panel'><h2>Local sources</h2>"

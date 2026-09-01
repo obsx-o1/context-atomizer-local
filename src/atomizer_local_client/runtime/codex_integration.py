@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from copy import deepcopy
 from dataclasses import dataclass
@@ -36,9 +37,14 @@ class _HookMutation:
 
 
 def hook_command(hook_executable: Path, database_path: Path) -> str:
-    return subprocess.list2cmdline(
-        [str(Path(hook_executable).resolve()), "--database", str(Path(database_path).resolve())]
-    )
+    arguments = [
+        str(Path(hook_executable).resolve()),
+        "--database",
+        str(Path(database_path).resolve()),
+    ]
+    if os.name == "nt":
+        return subprocess.list2cmdline(arguments)
+    return shlex.join(arguments)
 
 
 def _load(path: Path) -> dict[str, Any]:

@@ -3,11 +3,12 @@
   "name": "Context Atomizer Local Capture",
   "version": "0.1.0.0",
   "version_name": "0.1.0-dev0",
-  "description": "Captures user-visible ChatGPT web messages to a user-owned local history.",
+  "description": "Captures user-visible ChatGPT and Claude web messages to a user-owned local history.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://claude.ai/*",
     "http://127.0.0.1:43117/*"
   ],
   "background": {
@@ -25,6 +26,19 @@
         "core/capture.js",
         "browsers/shared/api.js",
         "browsers/shared/content_script.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": [
+        "core/types.js",
+        "core/dedupe.js",
+        "core/capture.js",
+        "browsers/claude/conversation.js",
+        "browsers/claude/selectors.js",
+        "browsers/shared/api.js",
+        "browsers/claude/content_script.js"
       ],
       "run_at": "document_idle"
     }

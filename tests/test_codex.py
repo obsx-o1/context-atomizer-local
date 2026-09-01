@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from pathlib import Path
 
 from test_support import TemporaryDatabaseTest
 
@@ -18,7 +19,7 @@ def user_prompt(**overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
         "session_id": "session-123",
         "turn_id": "turn-123",
-        "cwd": r"C:\Customers\PrivateProject",
+        "cwd": str(Path.cwd() / "Customers" / "PrivateProject"),
         "hook_event_name": "UserPromptSubmit",
         "prompt": "capture this supported prompt",
     }
@@ -30,7 +31,7 @@ def stop(**overrides: object) -> dict[str, object]:
     value: dict[str, object] = {
         "session_id": "session-123",
         "turn_id": "turn-123",
-        "cwd": r"C:\Customers\PrivateProject",
+        "cwd": str(Path.cwd() / "Customers" / "PrivateProject"),
         "hook_event_name": "Stop",
         "stop_hook_active": False,
         "last_assistant_message": "capture this assistant response",

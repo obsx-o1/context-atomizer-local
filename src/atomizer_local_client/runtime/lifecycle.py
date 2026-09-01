@@ -12,9 +12,15 @@ import urllib.error
 import urllib.request
 import webbrowser
 import ctypes
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from atomizer_local_client.platforms.credentials import current_credential_store
+from atomizer_local_client.runtime.claude_integration import (
+    install_claude_hooks,
+    remove_claude_hooks,
+)
 from atomizer_local_client.runtime.codex_integration import (
     codex_hook_file_has_atomizer_entries,
     codex_hook_file_is_empty,
@@ -28,7 +34,6 @@ from atomizer_local_client.runtime.configuration import (
     read_state,
     remove_state,
 )
-from atomizer_local_client.runtime.credentials import CredentialStore
 from atomizer_local_client.runtime.windows_startup import (
     WindowsRunRegistration,
     runtime_startup_command,
@@ -45,6 +50,15 @@ class StartupRegistration(Protocol):
 
 def _runtime_command_prefix() -> list[str]:
     scripts = Path(sys.executable).resolve().parent
+    if sys.platform == "darwin":
+        packaged = scripts / "atomizer-local-runtime"
+        if packaged.is_file():
+            return [str(packaged)]
+        return [
+            str(Path(sys.executable).resolve()),
+            "-m",
+            "atomizer_local_client.runtime.application",
+        ]
     packaged = scripts / "atomizer-local-runtime.exe"
     if packaged.is_file():
         return [str(packaged)]
@@ -55,9 +69,24 @@ def _runtime_command_prefix() -> list[str]:
 
 
 def _hook_executable() -> Path:
-    executable = Path(sys.executable).resolve().parent / "atomizer-codex-hook.exe"
+    executable_name = (
+        "atomizer-codex-hook" if sys.platform == "darwin" else "atomizer-codex-hook.exe"
+    )
+    executable = Path(sys.executable).resolve().parent / executable_name
     if not executable.is_file():
         raise RuntimeError("the packaged Codex hook executable is not installed")
+    return executable
+
+
+def _claude_hook_executable() -> Path:
+    executable_name = (
+        "atomizer-claude-hook"
+        if sys.platform == "darwin"
+        else "atomizer-claude-hook.exe"
+    )
+    executable = Path(sys.executable).resolve().parent / executable_name
+    if not executable.is_file():
+        raise RuntimeError("the packaged Claude hook executable is not installed")
     return executable
 
 
@@ -110,13 +139,19 @@ class LifecycleManager:
         credential_store: Any | None = None,
         process_launcher: RuntimeProcessLauncher | None = None,
         runtime_identity: RuntimeIdentity | None = None,
+        startup_command_builder: Callable[[list[str], Path], str] = runtime_startup_command,
+        url_opener: Callable[[str], bool] = webbrowser.open,
     ) -> None:
         self.paths = paths
         self.startup = startup
         self.runtime_command_prefix = list(runtime_command_prefix)
-        self.credential_store = credential_store or CredentialStore(paths.credential)
+        self.credential_store = credential_store or current_credential_store(
+            paths.credential
+        )
         self.process_launcher = process_launcher or RuntimeProcessLauncher()
         self.runtime_identity = runtime_identity or RuntimeIdentity()
+        self.startup_command_builder = startup_command_builder
+        self.url_opener = url_opener
         self.permission_store = PermissionStore(paths.permissions)
 
     def _command(self) -> list[str]:
@@ -160,16 +195,27 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
         chatgpt_enabled: bool | None = None,
     ) -> dict[str, object]:
-        self.paths.app_data.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.permissions import (
+                ensure_private_directory,
+            )
+
+            ensure_private_directory(self.paths.app_data)
+        else:
+            self.paths.app_data.mkdir(parents=True, exist_ok=True)
         effective = config
         if effective is None and self.paths.config.exists():
             effective = RuntimeConfig.load(self.paths.config)
         effective = effective or RuntimeConfig()
         effective.save(self.paths.config)
         self.credential_store.load_or_create()
-        command = runtime_startup_command(self.runtime_command_prefix, self.paths.config)
+        command = self.startup_command_builder(
+            self.runtime_command_prefix, self.paths.config
+        )
         self.startup.install(command)
         if chatgpt_enabled is not None:
             self.permission_store.set_enabled("chatgpt_web", chatgpt_enabled)
@@ -190,6 +236,16 @@ class LifecycleManager:
             )
             self.permission_store.set_codex_installed(True)
             self.permission_store.set_enabled("codex", True)
+        claude_changed = False
+        if claude_settings is not None:
+            claude_changed = install_claude_hooks(
+                claude_settings,
+                claude_hook_executable or _claude_hook_executable(),
+                self.paths.database,
+                self.paths.permissions,
+            )
+            self.permission_store.set_claude_code_installed(True)
+            self.permission_store.set_enabled("claude_code", True)
         if start and not self.status()["running"]:
             self.process_launcher.launch(self._command())
             self.wait_for_running()
@@ -200,6 +256,7 @@ class LifecycleManager:
             "codex_hooks_changed": codex_changed,
             "codex_workspace_targets": codex_workspace_targets,
             "codex_hook_changed_paths": codex_changed_paths,
+            "claude_hooks_changed": claude_changed,
             "database_preserved": self.paths.database.exists(),
             "permissions": {
                 name: permission.enabled
@@ -305,6 +362,8 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
     ) -> dict[str, Any]:
         codex_changed = False
         codex_workspace_targets = 0
@@ -323,9 +382,21 @@ class LifecycleManager:
             )
             self.permission_store.set_codex_installed(True)
             self.permission_store.set_enabled("codex", True)
+        claude_changed = False
+        if claude_settings is not None:
+            claude_changed = install_claude_hooks(
+                claude_settings,
+                claude_hook_executable or _claude_hook_executable(),
+                self.paths.database,
+                self.paths.permissions,
+            )
+            self.permission_store.set_claude_code_installed(True)
+            self.permission_store.set_enabled("claude_code", True)
         if read_state(self.paths.state) is not None:
             self.stop()
-        command = runtime_startup_command(self.runtime_command_prefix, self.paths.config)
+        command = self.startup_command_builder(
+            self.runtime_command_prefix, self.paths.config
+        )
         self.startup.install(command)
         status = self.start()
         return {
@@ -336,6 +407,7 @@ class LifecycleManager:
             "codex_hooks_changed": codex_changed,
             "codex_workspace_targets": codex_workspace_targets,
             "codex_hook_changed_paths": codex_changed_paths,
+            "claude_hooks_changed": claude_changed,
         }
 
     def rotate_credential(self) -> dict[str, object]:
@@ -351,6 +423,8 @@ class LifecycleManager:
         codex_hooks: Path | None = None,
         codex_config: Path | None = None,
         codex_hook_executable: Path | None = None,
+        claude_settings: Path | None = None,
+        claude_hook_executable: Path | None = None,
     ) -> dict[str, object]:
         if read_state(self.paths.state) is not None:
             self.stop()
@@ -398,9 +472,23 @@ class LifecycleManager:
                         f"hook_target:{type(error).__name__}"
                     )
             codex_changed = codex_changed_paths > 0
+        claude_changed = False
+        claude_cleanup_warnings: list[str] = []
+        if claude_settings is not None:
+            try:
+                claude_changed = remove_claude_hooks(
+                    claude_settings,
+                    claude_hook_executable or _claude_hook_executable(),
+                    self.paths.database,
+                    self.paths.permissions,
+                )
+            except Exception as error:
+                claude_cleanup_warnings.append(
+                    f"hook_target:{type(error).__name__}"
+                )
         self.startup.remove()
         self.credential_store.remove()
-        CredentialStore(
+        current_credential_store(
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         ).remove()
@@ -426,6 +514,9 @@ class LifecycleManager:
             "codex_hook_changed_paths": codex_changed_paths,
             "codex_cleanup_complete": not codex_cleanup_warnings,
             "codex_cleanup_warnings": tuple(codex_cleanup_warnings),
+            "claude_hooks_changed": claude_changed,
+            "claude_cleanup_complete": not claude_cleanup_warnings,
+            "claude_cleanup_warnings": tuple(claude_cleanup_warnings),
         }
 
     def open_library(self) -> bool:
@@ -447,10 +538,24 @@ class LifecycleManager:
         url = payload.get("url")
         if not isinstance(url, str) or not url.startswith("http://127.0.0.1:"):
             raise RuntimeError("runtime returned an invalid Library launch capability")
-        return webbrowser.open(url)
+        return self.url_opener(url)
 
 
 def _manager() -> LifecycleManager:
+    if sys.platform == "darwin":
+        from atomizer_local_client.platforms.macos.browser import open_url
+        from atomizer_local_client.platforms.macos.launch_agent import (
+            MacOSLaunchAgentRegistration,
+            runtime_startup_command as macos_runtime_startup_command,
+        )
+
+        return LifecycleManager(
+            RuntimePaths.current_user(),
+            startup=MacOSLaunchAgentRegistration(),
+            runtime_command_prefix=_runtime_command_prefix(),
+            startup_command_builder=macos_runtime_startup_command,
+            url_opener=open_url,
+        )
     return LifecycleManager(
         RuntimePaths.current_user(),
         startup=WindowsRunRegistration(),
@@ -475,9 +580,11 @@ def main() -> int:
         ),
     )
     parser.add_argument("--enable-codex", action="store_true")
+    parser.add_argument("--enable-claude", action="store_true")
     parser.add_argument("--enable-chatgpt", action="store_true")
     parser.add_argument("--codex-hooks", type=Path, default=None)
     parser.add_argument("--codex-config", type=Path, default=None)
+    parser.add_argument("--claude-settings", type=Path, default=None)
     arguments = parser.parse_args()
     manager = _manager()
     codex_path = arguments.codex_hooks
@@ -486,16 +593,28 @@ def main() -> int:
     codex_config = arguments.codex_config
     if codex_path is not None and codex_config is None:
         codex_config = codex_path.parent / "config.toml"
+    claude_settings = arguments.claude_settings
+    if arguments.enable_claude and claude_settings is None:
+        claude_settings = Path.home() / ".claude" / "settings.json"
     if arguments.command == "install":
         result = manager.install(
             codex_hooks=codex_path,
             codex_config=codex_config,
+            claude_settings=claude_settings,
             chatgpt_enabled=True if arguments.enable_chatgpt else None,
         )
     elif arguments.command == "update":
-        result = manager.update(codex_hooks=codex_path, codex_config=codex_config)
+        result = manager.update(
+            codex_hooks=codex_path,
+            codex_config=codex_config,
+            claude_settings=claude_settings,
+        )
     elif arguments.command == "uninstall":
-        result = manager.uninstall(codex_hooks=codex_path, codex_config=codex_config)
+        result = manager.uninstall(
+            codex_hooks=codex_path,
+            codex_config=codex_config,
+            claude_settings=claude_settings,
+        )
     elif arguments.command == "start":
         result = manager.start()
     elif arguments.command == "stop":
@@ -510,6 +629,8 @@ def main() -> int:
         result = {"opened": manager.open_library()}
     print(json.dumps(result, indent=2, sort_keys=True))
     if arguments.command == "uninstall" and not result.get("codex_cleanup_complete", True):
+        return 2
+    if arguments.command == "uninstall" and not result.get("claude_cleanup_complete", True):
         return 2
     return 0
 

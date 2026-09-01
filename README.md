@@ -1,6 +1,6 @@
 # Context Atomizer Local
 
-Context Atomizer Local is a Windows-first, local-only capture and retrieval client. It stores supported chat history and user-elected documents in a SQLite Library, builds retrieval state locally, and exposes a loopback-only Library UI.
+Context Atomizer Local is a Windows-first, local-only capture and retrieval client. It stores supported chat history and user-elected documents in a SQLite Library, builds retrieval state locally, and exposes a loopback-only Library UI. An experimental macOS foundation with native Apple Silicon and Intel CI coverage is also present; its hosted CI and human host-smoke validation are not yet complete.
 
 This repository is a development snapshot. It is not a hosted service, browser-store release, or signed production installer.
 
@@ -13,6 +13,7 @@ This repository is a development snapshot. It is not a hosted service, browser-s
 - Automatic bounded enrichment while the Library runtime is active.
 - Authenticated Library sessions and explicitly paired browser capture.
 - Windows runtime, installer, and validation tooling.
+- Experimental unsigned macOS user-runtime artifacts and native architecture CI.
 
 All capture, indexing, and retrieval in this repository remain on the local machine. The runtime binds to loopback and has no remote synchronization path.
 
@@ -27,6 +28,8 @@ python -m build --wheel
 ```
 
 See [INSTALL.md](INSTALL.md), [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), [SUPPORTED_CLIENTS.md](SUPPORTED_CLIENTS.md), and [DEVELOPMENT.md](DEVELOPMENT.md).
+
+macOS scope, current runner evidence, and support limitations are recorded in [MACOS.md](MACOS.md).
 
 ## License
 
