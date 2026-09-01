@@ -41,6 +41,7 @@ from atomizer_local_client.runtime.configuration import (
     write_json,
 )
 from atomizer_local_client.platforms.credentials import current_credential_store
+import atomizer_local_client.runtime.lifecycle as lifecycle_module
 from atomizer_local_client.runtime.credentials import CredentialStore
 from atomizer_local_client.runtime.lifecycle import LifecycleManager, RuntimeProcessLauncher
 from atomizer_local_client.runtime.permissions import PermissionStore
@@ -237,12 +238,25 @@ class _DiagnosticLifecycleManager(LifecycleManager):
             ) from error
 
     def stop(self, *, timeout: float = 8.0) -> bool:
-        try:
+        launcher = self.process_launcher
+        if not isinstance(launcher, ManagedChildLauncher):
             return super().stop(timeout=timeout)
+        fallback = lifecycle_module._process_is_running
+
+        def managed_child_is_running(pid: int) -> bool:
+            for process in launcher.processes:
+                if process.pid == pid:
+                    return process.poll() is None
+            return fallback(pid)
+
+        try:
+            with patch.object(
+                lifecycle_module,
+                "_process_is_running",
+                side_effect=managed_child_is_running,
+            ):
+                return super().stop(timeout=timeout)
         except RuntimeError as error:
-            launcher = self.process_launcher
-            if not isinstance(launcher, ManagedChildLauncher):
-                raise
             stage, exited = launcher.last_diagnostics()
             raise RuntimeError(
                 f"{error}; test_child_stage={stage}; test_child_exited={exited}"
