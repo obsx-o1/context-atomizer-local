@@ -19,8 +19,10 @@ remain the same implementation used on Windows.
   developer's normal Keychain. Keychain ACLs trust only the current executable
   and the installed manager/runtime siblings so the two runtime processes can
   share their separated credentials without broadening access to other apps.
-  The current process is represented by Keychain Services' native calling-tool
-  identity; installed sibling executables remain explicit paths.
+  The current executable is represented by both Keychain Services' native
+  calling-tool identity and its explicit path so an independently launched
+  runtime process can read the same credential. Installed sibling executables
+  remain explicit paths.
   Because development artifacts are unsigned, replacing an executable can
   change its code identity and make an existing ACL stale. That experimental
   upgrade case requires user-assisted credential repair; the runtime does not

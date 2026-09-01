@@ -223,7 +223,10 @@ class MacOSPlatformTests(unittest.TestCase):
         callbacks = backend.core_foundation.CFArrayCreate.call_args.args[3]
         self.assertIsNotNone(callbacks)
         self.assertEqual(callbacks._obj.value, 0)
-        self.assertEqual(trusted_paths, [None])
+        self.assertEqual(
+            trusted_paths,
+            [None, os.fsencode(Path(sys.executable).resolve())],
+        )
 
     def test_credential_selector_uses_keychain_only_for_macos(self) -> None:
         from atomizer_local_client.platforms.credentials import current_credential_store
@@ -469,9 +472,8 @@ class WindowsCompatibilitySeamTests(unittest.TestCase):
         expected = subprocess.list2cmdline(
             [str(executable.resolve()), "--database", str(database.resolve())]
         )
-        with mock.patch(
-            "atomizer_local_client.runtime.codex_integration.os.name", "nt"
-        ):
+        with mock.patch("atomizer_local_client.runtime.codex_integration.os") as local_os:
+            local_os.name = "nt"
             self.assertEqual(hook_command(executable, database), expected)
 
     def test_windows_runtime_launcher_discovery_is_unchanged(self) -> None:
@@ -590,6 +592,8 @@ class MacOSNativeKeychainTests(unittest.TestCase):
             stderr_path = Path(temporary) / "keychain-stderr.txt"
             probe = "\n".join(
                 (
+                    "import hashlib",
+                    "import subprocess",
                     "import sys",
                     "from pathlib import Path",
                     "from atomizer_local_client.platforms.macos.keychain import (",
@@ -602,6 +606,17 @@ class MacOSNativeKeychainTests(unittest.TestCase):
                     "first = store.load_or_create()",
                     "stage.write_text('load_existing', encoding='utf-8')",
                     "assert store.load() == first",
+                    "stage.write_text('cross_process_load', encoding='utf-8')",
+                    "child = subprocess.run(",
+                    "    [sys.executable, '-B', '-c',",
+                    "     'import hashlib, sys; from pathlib import Path; '",
+                    "     'from atomizer_local_client.platforms.macos.keychain import MacOSKeychainCredentialStore; '",
+                    "     'loaded = MacOSKeychainCredentialStore(Path(sys.argv[1]) / \\\'credential.bin\\\').load(); '",
+                    "     'assert hashlib.sha256(loaded.encode()).hexdigest() == sys.argv[2]',",
+                    "     sys.argv[1], hashlib.sha256(first.encode()).hexdigest()],",
+                    "    check=False, timeout=10,",
+                    ")",
+                    "assert child.returncode == 0",
                     "stage.write_text('rotate', encoding='utf-8')",
                     "second = store.rotate()",
                     "assert first != second",
