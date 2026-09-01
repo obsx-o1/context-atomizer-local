@@ -155,8 +155,15 @@ class AtomizerLocalRuntime:
         return tuple(range(preferred, min(65535, preferred + span) + 1))
 
     def _bind_bridge(self) -> LocalIngressServer:
+        server_type = LocalIngressServer
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.loopback_servers import (
+                MacOSLocalIngressServer,
+            )
+
+            server_type = MacOSLocalIngressServer
         try:
-            return LocalIngressServer(
+            return server_type(
                 self.paths.database,
                 str(self._token),
                 self.pairing_authority,
@@ -175,12 +182,19 @@ class AtomizerLocalRuntime:
             ) from exc
 
     def _bind_library(self, bridge_port: int) -> LibraryViewServer:
+        server_type = LibraryViewServer
+        if sys.platform == "darwin":
+            from atomizer_local_client.platforms.macos.loopback_servers import (
+                MacOSLibraryViewServer,
+            )
+
+            server_type = MacOSLibraryViewServer
         last_error: OSError | None = None
         for port in self._port_candidates(self.config.library_port, self.config.port_span):
             if port == bridge_port:
                 continue
             try:
-                return LibraryViewServer(
+                return server_type(
                     self.paths.database,
                     port,
                     maintenance_interval_seconds=self.config.maintenance_interval_seconds,

@@ -8,6 +8,8 @@ import os
 import plistlib
 import signal
 import shutil
+import socket
+import socketserver
 import sqlite3
 import stat
 import struct
@@ -33,6 +35,10 @@ from atomizer_local_client.platforms.macos.launch_agent import (
 )
 from atomizer_local_client.platforms.macos.paths import current_user_locations
 from atomizer_local_client.platforms.macos.permissions import ensure_private_directory
+from atomizer_local_client.platforms.macos.loopback_servers import (
+    MacOSLibraryViewServer,
+    MacOSLocalIngressServer,
+)
 from atomizer_local_client.runtime.codex_integration import hook_command
 from atomizer_local_client.runtime.configuration import RuntimePaths, write_json
 from atomizer_local_client.runtime.credentials import CredentialStore
@@ -111,6 +117,23 @@ class MacOSPlatformTests(unittest.TestCase):
                 / "Context Atomizer"
             ).resolve(),
         )
+
+    def test_loopback_servers_bind_without_reverse_dns(self) -> None:
+        for server_type, port in (
+            (MacOSLocalIngressServer, 43117),
+            (MacOSLibraryViewServer, 43118),
+        ):
+            server = mock.Mock()
+            server.server_address = ("127.0.0.1", port)
+            with mock.patch.object(
+                socketserver.TCPServer, "server_bind"
+            ) as numeric_bind, mock.patch.object(
+                socket, "getfqdn", side_effect=AssertionError("reverse DNS used")
+            ):
+                server_type.server_bind(server)
+            numeric_bind.assert_called_once_with(server)
+            self.assertEqual(server.server_name, "127.0.0.1")
+            self.assertEqual(server.server_port, port)
 
     @unittest.skipIf(os.name == "nt", "POSIX modes are not enforced by Windows")
     def test_runtime_directory_is_user_private(self) -> None:
