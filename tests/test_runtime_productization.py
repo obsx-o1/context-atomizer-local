@@ -75,29 +75,68 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
     def __init__(self) -> None:
         self.processes: list[subprocess.Popen[bytes]] = []
         self.creationflags: list[int] = []
+        self.stage_paths: list[Path] = []
         self.runtime_identity_root: Path | None = None
 
     def launch(self, command: list[str]) -> subprocess.Popen[bytes]:
         config_path = Path(command[-1])
+        stage_path = config_path.parent / f"test-runtime-stage-{len(self.processes)}.txt"
         environment = os.environ.copy()
         environment["PYTHONPATH"] = str(SOURCE_ROOT)
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        probe = "\n".join(
+            (
+                "import sys",
+                "from pathlib import Path",
+                "from atomizer_local_client.runtime.application import AtomizerLocalRuntime",
+                "from atomizer_local_client.runtime.configuration import RuntimeConfig, RuntimePaths",
+                "from atomizer_local_client.runtime_health import RuntimeIdentity",
+                "p = Path(sys.argv[1])",
+                "stage = Path(sys.argv[3])",
+                "stage.write_text('construct', encoding='utf-8')",
+                "try:",
+                "    identity = RuntimeIdentity(Path(sys.argv[2])) if sys.argv[2] else None",
+                "    runtime = AtomizerLocalRuntime(",
+                "        RuntimePaths.for_root(p.parent),",
+                "        RuntimeConfig.load(p),",
+                "        runtime_identity=identity,",
+                "        _test_bridge_port=0,",
+                "    )",
+                "    stage.write_text('credential_load', encoding='utf-8')",
+                "    runtime.credential_store.load_or_create()",
+                "    stage.write_text('runtime_start', encoding='utf-8')",
+                "    runtime.start()",
+                "    stage.write_text('running', encoding='utf-8')",
+                "    runtime.wait()",
+                "    stage.write_text('stopping', encoding='utf-8')",
+                "    runtime.stop()",
+                "    stage.write_text('complete', encoding='utf-8')",
+                "except BaseException as error:",
+                "    message = str(error)",
+                "    category = 'unclassified'",
+                "    for marker, label in ((",
+                "        'Keychain', 'keychain'),",
+                "        ('bridge', 'bridge'),",
+                "        ('Library port', 'library'),",
+                "        ('already running', 'instance_lock'),",
+                "    ):",
+                "        if marker in message:",
+                "            category = label",
+                "            break",
+                "    stage.write_text(",
+                "        f'error:{type(error).__name__}:{category}', encoding='utf-8'",
+                "    )",
+                "    raise",
+            )
+        )
         process = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
-                (
-                    "import sys; from pathlib import Path; "
-                    "from atomizer_local_client.runtime.application import AtomizerLocalRuntime; "
-                    "from atomizer_local_client.runtime.configuration import RuntimeConfig, RuntimePaths; "
-                    "from atomizer_local_client.runtime_health import RuntimeIdentity; "
-                    "p=Path(sys.argv[1]); identity=RuntimeIdentity(Path(sys.argv[2])) if sys.argv[2] else None; "
-                    "r=AtomizerLocalRuntime(RuntimePaths.for_root(p.parent), RuntimeConfig.load(p), "
-                    "runtime_identity=identity, _test_bridge_port=0); "
-                    "r.start(); r.wait(); r.stop()"
-                ),
+                probe,
                 str(config_path),
                 str(self.runtime_identity_root) if self.runtime_identity_root else "",
+                str(stage_path),
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -109,13 +148,39 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
         )
         self.processes.append(process)
         self.creationflags.append(flags)
+        self.stage_paths.append(stage_path)
         return process
+
+    def last_diagnostics(self) -> tuple[str, bool]:
+        if not self.processes:
+            return "not-launched", False
+        stage_path = self.stage_paths[-1]
+        stage = (
+            stage_path.read_text(encoding="utf-8")
+            if stage_path.is_file()
+            else "before-stage-receipt"
+        )
+        return stage, self.processes[-1].poll() is not None
 
     def cleanup(self) -> None:
         for process in self.processes:
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=5)
+
+
+class _DiagnosticLifecycleManager(LifecycleManager):
+    def wait_for_running(self, *, timeout: float = 8.0) -> dict[str, object]:
+        try:
+            return super().wait_for_running(timeout=timeout)
+        except RuntimeError as error:
+            launcher = self.process_launcher
+            if not isinstance(launcher, ManagedChildLauncher):
+                raise
+            stage, exited = launcher.last_diagnostics()
+            raise RuntimeError(
+                f"{error}; test_child_stage={stage}; test_child_exited={exited}"
+            ) from error
 
 
 class FakeRegistryKey:
@@ -178,7 +243,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.startup = FakeStartup()
         self.launcher = ManagedChildLauncher()
         self.runtime_executable = self.root / "installed" / "atomizer-local-runtime.exe"
-        self.manager = LifecycleManager(
+        self.manager = _DiagnosticLifecycleManager(
             self.paths,
             startup=self.startup,
             runtime_command_prefix=[str(self.runtime_executable)],
