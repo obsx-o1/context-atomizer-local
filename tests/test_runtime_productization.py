@@ -87,6 +87,7 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
         probe = "\n".join(
             (
                 "import sys",
+                "import socket",
                 "from contextlib import contextmanager",
                 "from pathlib import Path",
                 "import atomizer_local_client.runtime.application as application_module",
@@ -119,6 +120,13 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
                 "    )",
                 "    runtime._bind_bridge = traced('bridge_bind', runtime._bind_bridge)",
                 "    runtime._bind_library = traced('library_bind', runtime._bind_library)",
+                "    socket.getfqdn = traced('bridge_reverse_lookup', socket.getfqdn)",
+                "    application_module.LocalIngressServer.server_bind = traced(",
+                "        'bridge_server_bind', application_module.LocalIngressServer.server_bind",
+                "    )",
+                "    application_module.LocalIngressServer.server_activate = traced(",
+                "        'bridge_activate', application_module.LocalIngressServer.server_activate",
+                "    )",
                 "    original_database = application_module.database",
                 "    @contextmanager",
                 "    def traced_database(path):",
