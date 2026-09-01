@@ -143,6 +143,23 @@ class ManagedChildLauncher(RuntimeProcessLauncher):
                 "    runtime.credential_store.load_or_create()",
                 "    stage.write_text('runtime_start', encoding='utf-8')",
                 "    runtime.start()",
+                "    runtime._instance_lock.release = traced(",
+                "        'instance_unlock', runtime._instance_lock.release",
+                "    )",
+                "    application_module.remove_state = traced(",
+                "        'state_remove', application_module.remove_state",
+                "    )",
+                "    application_module.close_runtime_logging = traced(",
+                "        'logging_close', application_module.close_runtime_logging",
+                "    )",
+                "    for server_name, server in (",
+                "        ('library', runtime.library_server),",
+                "        ('bridge', runtime.bridge_server),",
+                "    ):",
+                "        server.shutdown = traced(f'{server_name}_shutdown', server.shutdown)",
+                "        server.server_close = traced(",
+                "            f'{server_name}_close', server.server_close",
+                "        )",
                 "    stage.write_text('running', encoding='utf-8')",
                 "    runtime.wait()",
                 "    stage.write_text('stopping', encoding='utf-8')",
@@ -210,6 +227,18 @@ class _DiagnosticLifecycleManager(LifecycleManager):
     def wait_for_running(self, *, timeout: float = 8.0) -> dict[str, object]:
         try:
             return super().wait_for_running(timeout=timeout)
+        except RuntimeError as error:
+            launcher = self.process_launcher
+            if not isinstance(launcher, ManagedChildLauncher):
+                raise
+            stage, exited = launcher.last_diagnostics()
+            raise RuntimeError(
+                f"{error}; test_child_stage={stage}; test_child_exited={exited}"
+            ) from error
+
+    def stop(self, *, timeout: float = 8.0) -> bool:
+        try:
+            return super().stop(timeout=timeout)
         except RuntimeError as error:
             launcher = self.process_launcher
             if not isinstance(launcher, ManagedChildLauncher):
@@ -534,8 +563,10 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         )
         self.assertEqual(capture_status, 200)
         self.assertTrue(capture["ok"])
-        management_blob = self.paths.credential.read_bytes()
-        extension_blob = self.paths.extension_credential.read_bytes()
+        management_credential = current_credential_store(
+            self.paths.credential
+        ).load()
+        extension_credential = extension_store.load()
 
         launches = len(self.launcher.processes)
         second = self.manager.install()
@@ -569,8 +600,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         after_restart_pid = int(read_state(self.paths.state)["pid"])
         self.assertTrue(restarted["running"])
         self.assertNotEqual(before_restart_pid, after_restart_pid)
-        self.assertEqual(self.paths.credential.read_bytes(), management_blob)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(
+            current_credential_store(self.paths.credential).load(),
+            management_credential,
+        )
+        self.assertEqual(extension_store.load(), extension_credential)
         restarted_state = read_state(self.paths.state)
         self.assertEqual(restarted_state["runtime_build"], old_identity)
         restarted_status = self.manager.status()
@@ -602,8 +636,11 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             current_identity,
         )
         self.assertFalse(updated_status["health"]["runtime"]["restart_required"])
-        self.assertEqual(self.paths.credential.read_bytes(), management_blob)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(
+            current_credential_store(self.paths.credential).load(),
+            management_credential,
+        )
+        self.assertEqual(extension_store.load(), extension_credential)
         update_capture_status, _ = self._signed_capture(
             int(after_update["bridge_port"]),
             extension_secret,
@@ -632,7 +669,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
             headers={"Authorization": f"Bearer {new_token}"},
         )
         self.assertEqual(new_status, 200)
-        self.assertEqual(self.paths.extension_credential.read_bytes(), extension_blob)
+        self.assertEqual(extension_store.load(), extension_credential)
 
         self.manager.stop()
         database_bytes = self.paths.database.read_bytes()
@@ -644,6 +681,10 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.assertFalse(self.paths.config.exists())
         self.assertFalse(self.paths.credential.exists())
         self.assertFalse(self.paths.extension_credential.exists())
+        with self.assertRaises(FileNotFoundError):
+            current_credential_store(self.paths.credential).load()
+        with self.assertRaises(FileNotFoundError):
+            extension_store.load()
         self.assertFalse(self.paths.library_shortcut.exists())
 
     def test_derived_convergence_poll_tolerates_transient_missing_health(self) -> None:
