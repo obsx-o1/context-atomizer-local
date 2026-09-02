@@ -29,6 +29,8 @@ from atomizer_local_client.local_auth.contracts import (
     capture_request_material,
     sign_hex,
 )
+from atomizer_local_client.managed_access.policy import LibraryAccessPolicyStore
+from atomizer_local_client.memory_access.access_gate import DirectLibraryAccessMode
 from atomizer_local_client.runtime.codex_integration import (
     hook_command,
     install_codex_hooks,
@@ -686,6 +688,9 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.assertEqual(extension_store.load(), extension_credential)
 
         self.manager.stop()
+        LibraryAccessPolicyStore(self.paths.access_policy).set_mode(
+            DirectLibraryAccessMode.MANAGED_EXCLUSIVE
+        )
         database_bytes = self.paths.database.read_bytes()
         removed = self.manager.uninstall()
         self.assertTrue(removed["uninstalled"])
@@ -693,6 +698,7 @@ class RuntimeProductizationTests(TemporaryDatabaseTest):
         self.assertTrue(removed["database_preserved"])
         self.assertEqual(self.paths.database.read_bytes(), database_bytes)
         self.assertFalse(self.paths.config.exists())
+        self.assertFalse(self.paths.access_policy.exists())
         self.assertFalse(self.paths.credential.exists())
         self.assertFalse(self.paths.extension_credential.exists())
         with self.assertRaises(FileNotFoundError):

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Context Atomizer Local Capture",
-  "version": "0.1.0.0",
-  "version_name": "0.1.0-dev0",
+  "version": "0.2.0.0",
+  "version_name": "0.2.0-dev0",
   "description": "Captures user-visible ChatGPT and Claude web messages to a user-owned local history.",
   "permissions": ["storage", "scripting"],
   "host_permissions": [

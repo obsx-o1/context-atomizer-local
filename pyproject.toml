@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-atomizer-local-client"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 description = "Local-first capture, Library, and retrieval for Context Atomizer"
 requires-python = ">=3.11"
 dependencies = []
@@ -14,6 +14,7 @@ atomizer-codex-hook = "atomizer_local_client.hosts.codex.hook_entrypoint:main"
 atomizer-claude-hook = "atomizer_local_client.hosts.claude_code.hook_entrypoint:main"
 atomizer-local = "atomizer_local_client.runtime.lifecycle:main"
 atomizer-local-mcp = "atomizer_local_client.mcp.server:main"
+atomizer-library-quality = "atomizer_local_client.evaluation.quality_benchmark:main"
 
 [project.gui-scripts]
 atomizer-local-runtime = "atomizer_local_client.runtime.application:main"

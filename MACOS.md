@@ -2,14 +2,20 @@
 
 Context Atomizer Local has an experimental macOS user-runtime foundation for
 Apple Silicon (`arm64`) and Intel (`x86_64`). Native GitHub-hosted CI validation
-runs on both architectures, and merge eligibility requires both native lanes to
-pass. It has not completed a human host smoke test, is not signed, and is not
+is configured on both architectures, and merge eligibility requires both native
+lanes to pass. The baseline has passed those lanes; this v0.2 branch has not yet
+run on the hosted lanes. It has not completed a human host smoke test, is not signed, and is not
 notarized. This is not a claim of full macOS support. CI artifacts are uploaded
 only after their native test and packaged-lifecycle steps pass.
 
 The macOS layer changes only operating-system boundaries. Capture, Library,
 SQLite, migrations, retrieval, pairing, HMAC/replay, and local security policy
 remain the same implementation used on Windows.
+
+The same full Python suite is configured on both native lanes to cover persisted managed-access
+policy, fake verified-manager activation, privileged read isolation, lease
+expiry/disconnect, and Codex/Claude hook formatting. No real private manager or
+human native-host session is claimed by those tests.
 
 ## Current platform decisions
 

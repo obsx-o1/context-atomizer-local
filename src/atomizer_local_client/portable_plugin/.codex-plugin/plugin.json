@@ -1,6 +1,6 @@
 {
   "name": "context-atomizer-local-library",
-  "version": "0.1.0-dev0",
+  "version": "0.2.0-dev0",
   "description": "Bounded read-only retrieval from an existing local Context Atomizer Library.",
   "author": {
     "name": "Context Atomizer"

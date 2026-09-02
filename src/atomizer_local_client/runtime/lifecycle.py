@@ -494,6 +494,7 @@ class LifecycleManager:
         ).remove()
         self.paths.config.unlink(missing_ok=True)
         self.paths.permissions.unlink(missing_ok=True)
+        self.paths.access_policy.unlink(missing_ok=True)
         self.paths.state.unlink(missing_ok=True)
         self.paths.lock.unlink(missing_ok=True)
         self.paths.library_shortcut.unlink(missing_ok=True)

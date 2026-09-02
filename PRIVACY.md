@@ -1,10 +1,14 @@
 # Privacy
 
-Context Atomizer Local stores its Library in a SQLite database owned by the current Windows user. It does not synchronize Library content to a remote service, call a model provider, or send analytics remotely.
+Context Atomizer Local stores its Library in a SQLite database owned by the current operating-system user. It does not synchronize Library content to a remote service, call a model provider, or send analytics remotely.
 
 ## What capture stores
 
 When Codex capture is enabled, the `UserPromptSubmit` hook stores the prompt text and the `Stop` hook stores `last_assistant_message`. Supported content is stored locally verbatim. The raw working-directory path is not stored; the client keeps a local hash for project association.
+
+Claude Code capture uses the same two documented hook events and the same local project-path hashing rule.
+
+In managed-exclusive mode, the original human prompt is captured first. A bounded request may then be exchanged in memory with a separately verified local manager and returned as host-native additional context. That context is not written as a human message, is not fed back through the ingestion path, and is not written to diagnostics. Pending prompt/context exchange state is memory-only and disappears on completion, timeout, disconnect, or runtime exit.
 
 When ChatGPT Web capture is enabled, the browser extension reads visible conversation messages. It also observes visible sidebar conversation titles and project associations so an existing local chat can receive its human-readable title. Captured content and retained title/project observations are sent only to the paired loopback runtime.
 
@@ -19,6 +23,8 @@ Revoking the pairing in Library deletes the runtime copy and future browser capt
 ## Disable, indexes, and document history
 
 Disabling an integration stops future capture for that integration. It does not delete already stored chats, documents, indexes, or search results.
+
+The authenticated Library UI can export canonical captured projects, chats, messages, elected documents, source registrations, and retained document revisions as local JSON. It can revoke elected sources without deleting the physical files. General chat delete/forget is not implemented because the existing canonical retention model has no safe operation for it; deleting the preserved SQLite Library remains a separate user action.
 
 The runtime builds local lexical and derived indexes, including semantic vectors, entities, claims, temporal state, contradictions, and verification state. These remain in the local SQLite Library.
 

@@ -50,7 +50,11 @@ No tool accepts SQL, filesystem paths, write data, an administrator flag, a call
 - `MANAGED_EXCLUSIVE`: the frontier receives only `Direct Library access is delegated to a trusted manager for this session.`
 - `DISABLED`: the frontier receives only a disabled status.
 
-`ManagedAuthorityProvider` is a public content-free seam for a future verified manager implementation. The internal `TRUSTED_MANAGER` caller is accepted only while that provider reports verified, unexpired authority. It is never an MCP argument. The human Library UI does not consult this gate and remains available in every mode.
+`ManagedAuthorityProvider` is a public content-free seam for a separately verified manager implementation. The internal `TRUSTED_MANAGER` caller is accepted only while that provider reports verified, unexpired authority. It is never an MCP argument. The human Library UI does not consult this gate and remains available in every mode.
+
+The human-selected mode is persisted outside SQLite and loaded by normal MCP launches. In managed-exclusive mode the existing authenticated loopback management surface can host a generic verifier, a runtime/scope/expiry-bound lease, a high-entropy manager capability, the internal `LibraryQueryService` reader, and a bounded turn exchange. The public runtime configures a rejecting verifier by default; no payload can self-assert trusted status.
+
+Codex and Claude Code `UserPromptSubmit` hooks capture the original prompt first and then, only under active managed-exclusive authority, request bounded context. They return the hosts' documented `hookSpecificOutput.additionalContext` shape. Standalone direct mode remains tool based. Browser managed reinjection is not supported because the browser capture surface has no equally safe pre-prompt context separation.
 
 This boundary governs supported integration surfaces. It does not try to prevent arbitrary same-user malware or an unrestricted coding agent from opening the SQLite file independently.
 

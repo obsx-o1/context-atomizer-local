@@ -22,6 +22,8 @@ from atomizer_local_client.mcp.server import (
 from atomizer_local_client.mcp.tools import LibraryToolRouter
 from atomizer_local_client.memory_access.query_service import LibraryQueryService
 from atomizer_local_client.runtime_health import runtime_version
+from atomizer_local_client.managed_access.policy import LibraryAccessPolicyStore
+from atomizer_local_client.memory_access.access_gate import DirectLibraryAccessMode
 
 
 def request(request_id: int, method: str, **params: object) -> dict[str, object]:
@@ -224,6 +226,42 @@ class LibraryMcpTests(TemporaryDatabaseTest):
         self.assertEqual(payload["status"], "managed_exclusive")
         self.assertEqual(payload["items"], [])
         self.assertNotIn("amber", json.dumps(payload).casefold())
+
+    def test_persisted_managed_policy_precedes_legacy_process_override(self) -> None:
+        LibraryAccessPolicyStore(
+            self.database_path.parent / "library-access-policy.json"
+        ).set_mode(DirectLibraryAccessMode.MANAGED_EXCLUSIVE)
+        environment = {**os.environ, "PYTHONPATH": str(SOURCE_ROOT)}
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "atomizer_local_client.mcp.server",
+                "--database",
+                str(self.database_path),
+                "--access-mode",
+                "DIRECT_LOCAL",
+            ],
+            input=json.dumps(
+                request(
+                    8,
+                    "tools/call",
+                    name="search_library",
+                    arguments={"query": "amber"},
+                )
+            )
+            + "\n",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+            timeout=10,
+        )
+        payload = json.loads(
+            json.loads(completed.stdout)["result"]["content"][0]["text"]
+        )
+        self.assertEqual(payload["status"], "managed_exclusive")
+        self.assertEqual(payload["items"], [])
 
 
 if __name__ == "__main__":

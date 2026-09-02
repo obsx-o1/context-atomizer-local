@@ -1,6 +1,14 @@
 # Security
 
-Context Atomizer Local is a local-only application. Its two loopback HTTP surfaces use separate, narrow authorities.
+Context Atomizer Local is a local-only application. Its two loopback HTTP surfaces use separate, narrow authorities. The managed Library operations reuse the existing authenticated capture/management listener; they do not add a listener.
+
+## Managed Library boundary
+
+The access mode is stored in a small policy file outside SQLite. A missing file preserves `DIRECT_LOCAL`; an unreadable or invalid file fails closed. Selecting `MANAGED_EXCLUSIVE` immediately denies direct frontier MCP reads. Lease expiry, verifier failure, manager disconnect, runtime restart, and request timeout never change that policy or reopen direct access.
+
+Managed activation is accepted only through a configured `ManagedAssertionVerifier`. The public default rejects every assertion. A verified result is bound to the exact runtime build, an opaque session reference, explicit Library scope references, and an expiry. Activation returns a high-entropy in-memory manager capability. Subsequent privileged reads and turn completion require that capability; public MCP schemas expose no manager, trusted, caller, or bypass field.
+
+Hook requests bind the original host, host session, host turn, and hashed workspace scope. Context completion must match all bindings, must arrive before expiry, is size bounded, and is single-use. Prompt/context bodies are not included in request logs or diagnostics. These controls do not turn the generic public interface into proof of any particular private authority system.
 
 ## Library boundary
 
@@ -45,7 +53,7 @@ These controls are intended to resist hostile web content, a fake loopback servi
 
 Codex hook ownership is determined from the parsed executable identity. Unrelated hooks are preserved, owned entries are removed, and ambiguous true Atomizer-like commands are left untouched and reported without preventing core uninstall cleanup.
 
-Technical-preview Windows installers may be unsigned and are published with SHA-256 checksums. Broad commercial Windows releases require Authenticode signing. An unsigned technical-preview installer is not, by itself, evidence that its contents are insecure; verify the published checksum and source provenance.
+Technical-preview Windows installers may be unsigned and are published with SHA-256 checksums. Broad commercial Windows releases require Authenticode signing. An unsigned technical-preview installer is not, by itself, evidence that its contents are insecure; verify the published checksum and source provenance. macOS development archives are likewise unsigned and unnotarized.
 
 ## Reporting vulnerabilities
 

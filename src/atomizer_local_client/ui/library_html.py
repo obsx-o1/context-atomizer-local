@@ -129,6 +129,7 @@ def render_permissions(
     *,
     status: str | None = None,
     pairing_code: str | None = None,
+    access: dict[str, Any] | None = None,
 ) -> bytes:
     def integration_card(
         key: str, label: str, secondary_label: str, secondary_value: str
@@ -176,6 +177,35 @@ def render_permissions(
         "<button class='danger' type='submit'>Revoke browser pairing</button></form></div>"
         "<p class='meta'>The paired secret is never displayed here. Revocation stops future browser capture until you pair again.</p></section>"
     )
+    access_state = access or {
+        "mode": "DIRECT_LOCAL",
+        "managed_authority": {"verified_active": False, "expires_at": None},
+    }
+    authority = access_state.get("managed_authority", {})
+    authority_active = bool(
+        isinstance(authority, dict) and authority.get("verified_active")
+    )
+    access_controls = [
+        "<section class='panel'><h2>Library access mode</h2>",
+        f"<p><span class='pill'>{escape(str(access_state.get('mode', 'UNKNOWN')))}</span> "
+        f"<span class='pill'>Managed authority: {'Active' if authority_active else 'Inactive'}</span></p>",
+        "<p>Direct local keeps the four read-only MCP tools available. Managed exclusive denies those tools and permits only a separately verified, short-lived manager session. Disabled denies both paths.</p>",
+        "<div class='grid'>",
+    ]
+    for mode, label in (
+        ("DIRECT_LOCAL", "Use direct local"),
+        ("MANAGED_EXCLUSIVE", "Use managed exclusive"),
+        ("DISABLED", "Disable Library access"),
+    ):
+        access_controls.extend(
+            (
+                "<form method='post' action='/library-access/set'>",
+                f"<input type='hidden' name='csrf_token' value='{escape(csrf_token, quote=True)}'>",
+                f"<input type='hidden' name='mode' value='{mode}'>",
+                f"<button type='submit'>{escape(label)}</button></form>",
+            )
+        )
+    access_controls.append("</div><p class='meta'>Manager expiry or disconnect never reopens direct access. Returning to direct local requires this explicit control.</p></section>")
     content = (
         "<h1>Permissions &amp; sources</h1>"
         "<p>Permissions stay on this computer. Enable an integration once to capture supported future activity automatically. The ChatGPT Web browser permission also governs Claude Web capture through the same paired extension.</p>"
@@ -186,6 +216,10 @@ def render_permissions(
         + integration_card("claude_code", "Claude Code", "Hook", claude_hook)
         + "</section>"
         + pairing_controls
+        + "".join(access_controls)
+        + "<section class='panel'><h2>Export captured material</h2>"
+        "<p>Download canonical captured projects, chats, messages, elected documents, source registrations, and document revisions as local JSON.</p>"
+        "<p><a href='/export'>Download Library export</a></p></section>"
         + "<section class='panel'><h2>Local sources</h2>"
         "<p>Open a Project to manage its Authorized folders and Authorized files. Add a folder once; Atomizer watches eligible .txt, .md, and .markdown files inside it automatically.</p>"
         "<p>Removing a source never deletes the physical file or folder.</p></section>"

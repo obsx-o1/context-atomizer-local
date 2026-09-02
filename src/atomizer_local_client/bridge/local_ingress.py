@@ -38,6 +38,7 @@ from atomizer_local_client.runtime_health import RuntimeIdentity, database_healt
 
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_CONTROL_BYTES = 4096
+_MAX_MANAGED_BYTES = 64 * 1024
 _CAPTURE_OPERATIONS = frozenset({"/v1/chat-events", "/v1/chat-titles"})
 
 
@@ -64,6 +65,7 @@ class LocalIngressServer(ThreadingHTTPServer):
         management_status_provider: Callable[[], dict[str, object]] | None = None,
         extension_seen_callback: Callable[[str], None] | None = None,
         integration_enabled: Callable[[str], bool] | None = None,
+        managed_ingress: object | None = None,
         _test_port: int | None = None,
     ) -> None:
         if len(management_token) < 32:
@@ -80,6 +82,7 @@ class LocalIngressServer(ThreadingHTTPServer):
         self.management_status_provider = management_status_provider
         self.extension_seen_callback = extension_seen_callback
         self.integration_enabled = integration_enabled or (lambda integration: True)
+        self.managed_ingress = managed_ingress
         bind_port = BRIDGE_PORT if _test_port is None else int(_test_port)
         super().__init__(("127.0.0.1", bind_port), LocalIngressHandler)
 
@@ -127,11 +130,21 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
         return hmac.compare_digest(supplied, expected)
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
-        if self.path != "/v1/management/status":
+        if self.path not in {"/v1/management/status", "/v1/managed/status"}:
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False})
             return
         if not self._management_authorized():
             self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
+            return
+        if self.path == "/v1/managed/status":
+            provider = self.server.managed_ingress
+            if provider is None:
+                self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+                return
+            try:
+                self._json_response(HTTPStatus.OK, provider.status())
+            except (ValueError, OSError):
+                self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
             return
         provider = self.server.management_status_provider
         if provider is None:
@@ -154,6 +167,9 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
             return
         if self.path in {"/v1/runtime/stop", "/v1/library/launch"}:
             self._management_action()
+            return
+        if self.path.startswith("/v1/managed/"):
+            self._managed_action()
             return
         self._json_response(HTTPStatus.NOT_FOUND, {"ok": False})
 
@@ -308,6 +324,31 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
             self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
             return
         self._json_response(HTTPStatus.OK, {"ok": True, "url": provider()})
+
+    def _managed_action(self) -> None:
+        if not self._management_authorized():
+            self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
+            return
+        provider = self.server.managed_ingress
+        if provider is None:
+            self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+            return
+        try:
+            payload = self._object(self._read_body(_MAX_MANAGED_BYTES))
+            result = provider.post(self.path, payload)
+        except PermissionError:
+            self._json_response(HTTPStatus.FORBIDDEN, {"ok": False})
+            return
+        except (ValueError, UnicodeError, json.JSONDecodeError):
+            self._json_response(HTTPStatus.BAD_REQUEST, {"ok": False})
+            return
+        except BaseException as error:
+            record_capture_error(
+                self.server.database_path.parent, "managed_operation_failed", error
+            )
+            self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+            return
+        self._json_response(HTTPStatus.OK, result)
 
 
 def main() -> int:

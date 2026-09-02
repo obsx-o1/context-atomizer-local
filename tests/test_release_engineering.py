@@ -851,12 +851,12 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
 
     def test_one_canonical_pep440_version_drives_runtime_and_browser_metadata(self) -> None:
         project = tomllib.loads((PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        self.assertEqual(project["project"]["version"], "0.1.0.dev0")
+        self.assertEqual(project["project"]["version"], "0.2.0.dev0")
         with mock.patch(
             "atomizer_local_client.runtime_health.importlib.metadata.version",
             return_value=project["project"]["version"],
         ):
-            self.assertEqual(runtime_version(), "0.1.0.dev0")
+            self.assertEqual(runtime_version(), "0.2.0.dev0")
         self.assertEqual(
             HOOK_OWNERSHIP_CONTRACT_VERSION, "codex-hook-ownership-v1"
         )
@@ -869,15 +869,15 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         module = importlib.util.module_from_spec(specification)
         assert specification.loader is not None
         specification.loader.exec_module(module)
-        self.assertEqual(module.release_versions(), ("0.1.0.0", "0.1.0-dev0"))
+        self.assertEqual(module.release_versions(), ("0.2.0.0", "0.2.0-dev0"))
         for browser in ("chromium", "firefox"):
             source = json.loads(
                 (PACKAGE_ROOT / "browser_extension" / "browsers" / browser / "manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(source["version"], "0.1.0.0")
-            self.assertEqual(source["version_name"], "0.1.0-dev0")
+            self.assertEqual(source["version"], "0.2.0.0")
+            self.assertEqual(source["version_name"], "0.2.0-dev0")
 
     def test_release_migration_boundary_is_exactly_001_through_007(self) -> None:
         identifiers = registered_migration_ids()
@@ -1106,8 +1106,8 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            installer = root / "ContextAtomizer-Setup-v0.1.0-dev0.exe"
-            chromium = root / "ContextAtomizer-Chromium-v0.1.0-dev0.zip"
+            installer = root / "ContextAtomizer-Setup-v0.2.0-dev0.exe"
+            chromium = root / "ContextAtomizer-Chromium-v0.2.0-dev0.zip"
             installer.write_bytes(b"exact-installer")
             chromium.write_bytes(b"exact-chromium")
             candidate = {
@@ -1149,7 +1149,7 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
             with mock.patch.object(sys, "argv", arguments):
                 self.assertEqual(finalizer.main(), 0)
             manifest = json.loads(
-                (output / "ContextAtomizer-v0.1.0-dev0-manifest.json").read_text(
+                (output / "ContextAtomizer-v0.2.0-dev0-manifest.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -1162,8 +1162,8 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
                 {
                     installer.name,
                     chromium.name,
-                    "ContextAtomizer-v0.1.0-dev0-manifest.json",
-                    "ContextAtomizer-v0.1.0-dev0-SHA256SUMS.txt",
+                    "ContextAtomizer-v0.2.0-dev0-manifest.json",
+                    "ContextAtomizer-v0.2.0-dev0-SHA256SUMS.txt",
                 },
             )
 

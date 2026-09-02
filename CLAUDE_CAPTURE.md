@@ -20,4 +20,4 @@ Not claimed:
 - Claude mobile capture.
 - Cloud hook installation from the local user settings file. Claude Code web uses repository or organization-managed hooks; the browser adapter is the local capture surface there.
 
-The hook writes no decisions, prompt context, or message content to stdout. It does not read Claude transcript files, internal databases, cookies, browser credentials, or authentication tokens.
+In standalone or unavailable-manager operation the hook writes nothing to stdout. In managed-exclusive mode with a separately verified active manager, `UserPromptSubmit` may return only Anthropic's documented `hookSpecificOutput.additionalContext` object after the original prompt has been captured. It does not read Claude transcript files, internal databases, cookies, browser credentials, or authentication tokens, and returned managed context is not re-ingested as a user message.

@@ -11,7 +11,9 @@ from typing import BinaryIO, TextIO
 from atomizer_local_client.diagnostics import record_capture_error
 from atomizer_local_client.hosts.claude_code.hook_adapter import (
     capture_claude_hook_fail_open,
+    normalize_claude_hook,
 )
+from atomizer_local_client.managed_access.hook_client import request_managed_context
 from atomizer_local_client.runtime.permissions import PermissionStore
 
 
@@ -24,9 +26,9 @@ def run_hook(
     database_path: Path,
     permission_store: PermissionStore | None = None,
 ) -> int:
-    """Capture without writing hook decisions or context to stdout."""
+    """Capture first, then return only separately managed native context."""
 
-    del stdout
+    managed_context: str | None = None
     try:
         raw = stdin.read(MAX_HOOK_BYTES + 1)
         if len(raw) > MAX_HOOK_BYTES:
@@ -36,8 +38,27 @@ def run_hook(
             raise ValueError("hook payload must be an object")
         if permission_store is None or permission_store.is_enabled("claude_code"):
             capture_claude_hook_fail_open(payload, database_path)
+            if payload.get("hook_event_name") == "UserPromptSubmit":
+                event = normalize_claude_hook(payload)
+                if event is not None:
+                    managed_context = request_managed_context(event, database_path)
     except BaseException as error:
         record_capture_error(Path(database_path).parent, "claude_hook_input_failed", error)
+    if managed_context is not None:
+        stdout.write(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": managed_context,
+                    }
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        stdout.flush()
     return 0
 
 

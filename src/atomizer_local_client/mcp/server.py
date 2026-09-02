@@ -17,6 +17,11 @@ from atomizer_local_client.memory_access.query_service import (
     LibraryQueryError,
     LibraryQueryService,
 )
+from atomizer_local_client.managed_access.policy import (
+    LibraryAccessPolicyStore,
+    PolicyBackedAccessGate,
+)
+from atomizer_local_client.memory_access.contracts import InactiveManagedAuthorityProvider
 from atomizer_local_client.mcp.contracts import TOOLS
 from atomizer_local_client.mcp.tools import LibraryToolRouter, ToolArgumentsError
 from atomizer_local_client.runtime.configuration import RuntimePaths
@@ -153,11 +158,26 @@ def main() -> int:
     parser.add_argument(
         "--access-mode",
         choices=tuple(mode.value for mode in DirectLibraryAccessMode),
-        default=os.environ.get("ATOMIZER_DIRECT_LIBRARY_MODE", DirectLibraryAccessMode.DIRECT_LOCAL.value),
+        default=os.environ.get("ATOMIZER_DIRECT_LIBRARY_MODE"),
     )
     arguments = parser.parse_args()
-    gate = LibraryAccessGate(DirectLibraryAccessMode(arguments.access_mode))
-    service = LibraryQueryService(_database_path(arguments.database), gate=gate)
+    database_path = _database_path(arguments.database)
+    policy = LibraryAccessPolicyStore(
+        database_path.parent / "library-access-policy.json"
+    )
+    if policy.path.exists():
+        gate = PolicyBackedAccessGate(
+            policy,
+            manager=InactiveManagedAuthorityProvider(),
+        )
+    elif arguments.access_mode is not None:
+        gate = LibraryAccessGate(DirectLibraryAccessMode(arguments.access_mode))
+    else:
+        gate = PolicyBackedAccessGate(
+            policy,
+            manager=InactiveManagedAuthorityProvider(),
+        )
+    service = LibraryQueryService(database_path, gate=gate)
     return StdioMcpServer(LibraryToolRouter(service)).serve(sys.stdin, sys.stdout)
 
 
