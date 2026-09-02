@@ -41,10 +41,10 @@ def main() -> int:
     shutil.copy2(installer, args.output / installer.name)
     shutil.copy2(chromium, args.output / chromium.name)
     manifest = {**candidate, "lifecycle": {name: {"passed": True} for name in sorted(lifecycle)}}
-    manifest_path = args.output / "ContextAtomizer-v0.1.0-dev0-manifest.json"
+    manifest_path = args.output / "ContextAtomizer-v0.2.0-dev0-manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksummed = [installer.name, chromium.name, manifest_path.name]
-    sums = args.output / "ContextAtomizer-v0.1.0-dev0-SHA256SUMS.txt"
+    sums = args.output / "ContextAtomizer-v0.2.0-dev0-SHA256SUMS.txt"
     sums.write_text("".join(f"{sha256(args.output / name)}  {name}\n" for name in checksummed), encoding="utf-8")
     return 0
 

@@ -1,6 +1,16 @@
 # Security
 
-Context Atomizer Local is a local-only application. Its two loopback HTTP surfaces use separate, narrow authorities.
+Context Atomizer Local is a local-only application. Its two loopback HTTP surfaces use separate, narrow authorities. The managed Library operations reuse the existing authenticated capture/management listener; they do not add a listener.
+
+## Managed Library boundary
+
+The access mode is stored in a small policy file outside SQLite. A missing file preserves `DIRECT_LOCAL`; an unreadable or invalid file fails closed. Selecting `MANAGED_EXCLUSIVE` immediately denies direct frontier MCP reads. Lease expiry, verifier failure, manager disconnect, runtime restart, and request timeout never change that policy or reopen direct access.
+
+Trusted-manager pairing is an explicit copy/paste action initiated in authenticated Library. It has the same bounded code lifetime and attempt controls as extension pairing but creates a different high-entropy secret in `managed-connector.bin`. That secret is OS protected, revocable, and never exposed to MCP or diagnostics. The browser and generic management credentials cannot authenticate the managed channel.
+
+Each managed request is authenticated with purpose-separated HMAC-SHA256 over the protocol, method, path, nonce, timestamp, and exact body digest. Managed activation additionally requires a `managed_library` lease authenticated over canonical claims. The claims bind the exact runtime build and instance, opaque manager/host-session/turn references, explicit Library scope, purpose, issue and expiry times, and capability identity. Request and lease replay state is bounded. Activation returns a separate high-entropy in-memory manager capability. Subsequent privileged reads and turn completion require that capability; public MCP schemas expose no manager, trusted, caller, or bypass field.
+
+Hook requests bind the original host, host session, host turn, and hashed workspace scope. Context completion must match all bindings, must arrive before expiry, is size bounded, and is single-use. Prompt/context bodies are not included in request logs or diagnostics. The local HMAC proves only that a request came from the paired manager; the separate private adapter is responsible for issuing it only after existing private authorization succeeds. Local does not reproduce or receive that private verifier, its policy, or its artifacts.
 
 ## Library boundary
 
@@ -45,7 +55,7 @@ These controls are intended to resist hostile web content, a fake loopback servi
 
 Codex hook ownership is determined from the parsed executable identity. Unrelated hooks are preserved, owned entries are removed, and ambiguous true Atomizer-like commands are left untouched and reported without preventing core uninstall cleanup.
 
-Technical-preview Windows installers may be unsigned and are published with SHA-256 checksums. Broad commercial Windows releases require Authenticode signing. An unsigned technical-preview installer is not, by itself, evidence that its contents are insecure; verify the published checksum and source provenance.
+Technical-preview Windows installers may be unsigned and are published with SHA-256 checksums. Broad commercial Windows releases require Authenticode signing. An unsigned technical-preview installer is not, by itself, evidence that its contents are insecure; verify the published checksum and source provenance. macOS development archives are likewise unsigned and unnotarized.
 
 ## Reporting vulnerabilities
 

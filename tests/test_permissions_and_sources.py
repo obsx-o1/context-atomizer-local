@@ -28,6 +28,8 @@ from atomizer_local_client.local_auth.contracts import capture_request_material,
 from atomizer_local_client.local_auth.library_session import LibrarySessionAuthority
 from atomizer_local_client.local_auth.pairing import ExtensionPairingAuthority
 from atomizer_local_client.runtime.permissions import PermissionStore
+from atomizer_local_client.managed_access.policy import LibraryAccessPolicyStore
+from atomizer_local_client.memory_access.access_gate import DirectLibraryAccessMode
 from atomizer_local_client.ui.library_server import LibraryViewServer
 
 
@@ -194,6 +196,7 @@ class PermissionAndSourceTests(TemporaryDatabaseTest):
         store = PermissionStore(self.root / "permissions.json")
         store.set_codex_installed(True)
         sessions = LibrarySessionAuthority()
+        access_policy = LibraryAccessPolicyStore(self.root / "library-access-policy.json")
         server = LibraryViewServer(
             self.database_path,
             0,
@@ -207,6 +210,7 @@ class PermissionAndSourceTests(TemporaryDatabaseTest):
                 "last_seen_at": "now",
                 "paired": True,
             },
+            access_policy=access_policy,
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -228,6 +232,10 @@ class PermissionAndSourceTests(TemporaryDatabaseTest):
                 "Hook: Installed",
                 "Authorized folders",
                 "Add a folder once",
+                "Library access mode",
+                "DIRECT_LOCAL",
+                "Managed authority: Inactive",
+                "Download Library export",
             ):
                 self.assertIn(label, body)
             for forbidden in ("bridge token", "43117", "source UUID", "host reference"):
@@ -252,6 +260,32 @@ class PermissionAndSourceTests(TemporaryDatabaseTest):
                 enabled_body = response.read().decode("utf-8")
             self.assertIn("ChatGPT Web is enabled", enabled_body)
             self.assertTrue(PermissionStore(store.path).is_enabled("chatgpt_web"))
+            access_request = urllib.request.Request(
+                base + "/library-access/set",
+                data=urllib.parse.urlencode(
+                    {
+                        "csrf_token": "permission-csrf",
+                        "mode": "MANAGED_EXCLUSIVE",
+                    }
+                ).encode(),
+                method="POST",
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Origin": base,
+                    "Sec-Fetch-Site": "same-origin",
+                },
+            )
+            with opener.open(access_request, timeout=3) as response:
+                managed_body = response.read().decode("utf-8")
+            self.assertIn("Library access mode is MANAGED_EXCLUSIVE", managed_body)
+            self.assertEqual(
+                access_policy.mode(), DirectLibraryAccessMode.MANAGED_EXCLUSIVE
+            )
+            with opener.open(base + "/export", timeout=3) as response:
+                exported = json.loads(response.read())
+            self.assertEqual(
+                exported["schema_version"], "context-atomizer-library-export-v1"
+            )
         finally:
             server.shutdown()
             server.server_close()

@@ -38,6 +38,8 @@ class RuntimePaths:
     state: Path
     credential: Path
     extension_credential: Path
+    managed_credential: Path
+    access_policy: Path
     lock: Path
     log: Path
     library_shortcut: Path
@@ -53,6 +55,8 @@ class RuntimePaths:
             state=root / "runtime-state.json",
             credential=root / "management-credential.bin",
             extension_credential=root / "extension-pairing.bin",
+            managed_credential=root / "managed-connector.bin",
+            access_policy=root / "library-access-policy.json",
             lock=root / "runtime.lock",
             log=root / "logs" / "runtime.log",
             library_shortcut=(shortcut or root / "Context Atomizer Library.url").resolve(),

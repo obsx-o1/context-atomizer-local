@@ -27,6 +27,18 @@ from atomizer_local_client.runtime.logging_setup import (
     configure_runtime_logging,
 )
 from atomizer_local_client.runtime_health import RuntimeIdentity
+from atomizer_local_client.managed_access.authority import ManagedAuthorityRegistry
+from atomizer_local_client.managed_access.broker import ManagedContextBroker
+from atomizer_local_client.managed_access.capability import (
+    AuthenticatedManagedAssertionVerifier,
+)
+from atomizer_local_client.managed_access.ingress import ManagedIngress
+from atomizer_local_client.managed_access.policy import (
+    LibraryAccessPolicyStore,
+    PolicyBackedAccessGate,
+)
+from atomizer_local_client.managed_access.reader import ManagedLibraryReader
+from atomizer_local_client.memory_access.query_service import LibraryQueryService
 from atomizer_local_client.runtime.permissions import PermissionStore
 from atomizer_local_client.ui.library_server import LibraryViewServer
 
@@ -136,7 +148,36 @@ class AtomizerLocalRuntime:
                 description="Context Atomizer Local extension pairing secret",
             )
         )
+        self.managed_pairing_authority = ExtensionPairingAuthority(
+            current_credential_store(
+                paths.managed_credential,
+                description="Context Atomizer Local managed connector secret",
+            )
+        )
         self.library_sessions = LibrarySessionAuthority()
+        self.access_policy = LibraryAccessPolicyStore(paths.access_policy)
+        self.managed_authority = ManagedAuthorityRegistry(
+            self.runtime_identity.startup_build_sha256
+        )
+        self.managed_broker = ManagedContextBroker(self.managed_authority)
+        managed_gate = PolicyBackedAccessGate(
+            self.access_policy, manager=self.managed_authority
+        )
+        managed_queries = LibraryQueryService(paths.database, gate=managed_gate)
+        self.managed_ingress = ManagedIngress(
+            policy=self.access_policy,
+            authority=self.managed_authority,
+            broker=self.managed_broker,
+            reader=ManagedLibraryReader(
+                paths.database, managed_queries, self.managed_authority
+            ),
+            verifier=AuthenticatedManagedAssertionVerifier(
+                self.managed_pairing_authority.secret,
+                runtime_instance_reference=(
+                    self.managed_authority.runtime_instance_reference
+                ),
+            ),
+        )
         self.bridge_server: LocalIngressServer | None = None
         self.library_server: LibraryViewServer | None = None
         self._threads: list[threading.Thread] = []
@@ -174,6 +215,8 @@ class AtomizerLocalRuntime:
                 management_status_provider=self._management_status,
                 extension_seen_callback=self.extension_state.seen,
                 integration_enabled=self.permission_store.is_enabled,
+                managed_ingress=self.managed_ingress,
+                managed_pairing_authority=self.managed_pairing_authority,
                 _test_port=self._test_bridge_port,
             )
         except OSError as exc:
@@ -205,6 +248,13 @@ class AtomizerLocalRuntime:
                     session_authority=self.library_sessions,
                     pairing_code_provider=self.pairing_authority.issue_code,
                     pairing_revoke_callback=self.pairing_authority.revoke,
+                    access_policy=self.access_policy,
+                    managed_status_provider=self._managed_status,
+                    managed_pairing_code_provider=(
+                        self.managed_pairing_authority.issue_code
+                    ),
+                    managed_pairing_revoke_callback=self._revoke_managed_pairing,
+                    access_mode_setter=self._set_access_mode,
                 )
             except OSError as exc:
                 last_error = exc
@@ -215,6 +265,22 @@ class AtomizerLocalRuntime:
             **self.extension_state.snapshot(),
             "paired": self.pairing_authority.paired,
         }
+
+    def _managed_status(self) -> dict[str, object]:
+        return {
+            **self.managed_authority.status(),
+            "paired": self.managed_pairing_authority.paired,
+        }
+
+    def _set_access_mode(self, mode: str):  # type: ignore[no-untyped-def]
+        self.managed_authority.revoke()
+        self.managed_broker.revoke()
+        return self.access_policy.set_mode(mode)
+
+    def _revoke_managed_pairing(self) -> None:
+        self.managed_pairing_authority.revoke()
+        self.managed_authority.revoke()
+        self.managed_broker.revoke()
 
     def _library_launch_url(self) -> str:
         if self.library_server is None:
@@ -292,6 +358,8 @@ class AtomizerLocalRuntime:
         if not self._owns_instance:
             return
         self._stop_event.set()
+        self.managed_authority.revoke()
+        self.managed_broker.revoke()
         serving = bool(self._threads)
         for server in (self.library_server, self.bridge_server):
             if server is not None:

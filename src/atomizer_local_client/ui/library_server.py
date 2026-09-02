@@ -25,9 +25,12 @@ from atomizer_local_client.library.document_registry import (
     sync_elected_source,
 )
 from atomizer_local_client.library.source_maintenance import AutomaticSourceMaintainer
+from atomizer_local_client.library.export_service import export_captured_library
 from atomizer_local_client.derived_state.maintenance import AutomaticDerivedStateMaintainer
 from atomizer_local_client.runtime_health import RuntimeIdentity, bridge_reachable, database_health
 from atomizer_local_client.runtime.permissions import PermissionStore
+from atomizer_local_client.managed_access.policy import LibraryAccessPolicyStore
+from atomizer_local_client.memory_access.access_gate import DirectLibraryAccessMode
 from atomizer_local_client.library.view_service import (
     list_projects,
     read_chat_view,
@@ -73,6 +76,11 @@ class LibraryViewServer(ThreadingHTTPServer):
         session_authority: LibrarySessionAuthority | None = None,
         pairing_code_provider: Callable[[], str] | None = None,
         pairing_revoke_callback: Callable[[], None] | None = None,
+        access_policy: LibraryAccessPolicyStore | None = None,
+        managed_status_provider: Callable[[], dict[str, object]] | None = None,
+        managed_pairing_code_provider: Callable[[], str] | None = None,
+        managed_pairing_revoke_callback: Callable[[], None] | None = None,
+        access_mode_setter: Callable[[str], DirectLibraryAccessMode] | None = None,
     ) -> None:
         self.database_path = Path(database_path)
         self.bridge_port = int(bridge_port)
@@ -84,6 +92,13 @@ class LibraryViewServer(ThreadingHTTPServer):
         self.session_authority = session_authority or LibrarySessionAuthority()
         self.pairing_code_provider = pairing_code_provider
         self.pairing_revoke_callback = pairing_revoke_callback
+        self.access_policy = access_policy or LibraryAccessPolicyStore(
+            self.database_path.parent / "library-access-policy.json"
+        )
+        self.managed_status_provider = managed_status_provider
+        self.managed_pairing_code_provider = managed_pairing_code_provider
+        self.managed_pairing_revoke_callback = managed_pairing_revoke_callback
+        self.access_mode_setter = access_mode_setter or self.access_policy.set_mode
         self.csrf_token = csrf_token or secrets.token_urlsafe(32)
         self.automatic_maintenance_enabled = automatic_maintenance
         self.source_operation_lock = threading.RLock()
@@ -163,6 +178,14 @@ class LibraryViewServer(ThreadingHTTPServer):
                 }
                 for name, permission in self.permission_store.snapshot().items()
             },
+            "library_access": {
+                "mode": self._access_mode(),
+                "managed_authority": (
+                    self.managed_status_provider()
+                    if self.managed_status_provider is not None
+                    else {"verified_active": False, "expires_at": None}
+                ),
+            },
         }
         payload["ok"] = bool(
             payload["database"]["healthy"]
@@ -171,6 +194,12 @@ class LibraryViewServer(ThreadingHTTPServer):
             and derived_health["state"] != "error"
         )
         return payload
+
+    def _access_mode(self) -> str:
+        try:
+            return self.access_policy.mode().value
+        except ValueError:
+            return DirectLibraryAccessMode.DISABLED.value
 
 
 class LibraryViewHandler(BaseHTTPRequestHandler):
@@ -311,6 +340,17 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.UNAUTHORIZED, "Open the Library from Context Atomizer Local.")
             return
         try:
+            if parsed.path == "/export":
+                body = export_captured_library(self.server.database_path)
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition", "attachment; filename=atomizer-library-export.json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if parsed.path == "/":
                 status = parameters.get("status", [None])[0]
                 self._html(render_home(list_projects(self.server.database_path), status=status))
@@ -367,6 +407,7 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                         self.server.permission_store.snapshot(),
                         self.server.health_snapshot()["extension"],
                         self.server.csrf_token,
+                        access=self.server.health_snapshot()["library_access"],
                         status=status,
                     )
                 )
@@ -397,6 +438,7 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                         self.server.permission_store.snapshot(),
                         self.server.health_snapshot()["extension"],
                         self.server.csrf_token,
+                        access=self.server.health_snapshot()["library_access"],
                         pairing_code=code,
                         status="A new one-time pairing code was created.",
                     )
@@ -409,6 +451,30 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                 self._redirect(
                     "/permissions",
                     status="Browser extension pairing was revoked.",
+                )
+                return
+            if parsed.path == "/managed/pairing-code":
+                if self.server.managed_pairing_code_provider is None:
+                    raise RuntimeError("managed connector pairing is unavailable")
+                code = self.server.managed_pairing_code_provider()
+                self._html(
+                    render_permissions(
+                        self.server.permission_store.snapshot(),
+                        self.server.health_snapshot()["extension"],
+                        self.server.csrf_token,
+                        access=self.server.health_snapshot()["library_access"],
+                        managed_pairing_code=code,
+                        status="A new one-time managed connector pairing code was created.",
+                    )
+                )
+                return
+            if parsed.path == "/managed/revoke":
+                if self.server.managed_pairing_revoke_callback is None:
+                    raise RuntimeError("managed connector pairing is unavailable")
+                self.server.managed_pairing_revoke_callback()
+                self._redirect(
+                    "/permissions",
+                    status="Trusted manager pairing was revoked.",
                 )
                 return
             if parsed.path == "/integration/set":
@@ -428,6 +494,17 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                 self._redirect(
                     "/permissions",
                     status=f"{label} is {state}. Existing Library history was preserved.",
+                )
+                return
+            if parsed.path == "/library-access/set":
+                selected = self._single(form, "mode")
+                mode = self.server.access_mode_setter(selected)
+                self._redirect(
+                    "/permissions",
+                    status=(
+                        f"Library access mode is {mode.value}. "
+                        "Changing mode does not grant managed authority."
+                    ),
                 )
                 return
             project_id = self._single(form, "project_id")

@@ -12,8 +12,8 @@ permissions:
 
 env:
   CANDIDATE_ARTIFACT_NAME: context-atomizer-internal-${{ github.sha }}
-  INSTALLER_NAME: ContextAtomizer-Setup-v0.1.0-dev0.exe
-  CHROMIUM_NAME: ContextAtomizer-Chromium-v0.1.0-dev0.zip
+  INSTALLER_NAME: ContextAtomizer-Setup-v0.2.0-dev0.exe
+  CHROMIUM_NAME: ContextAtomizer-Chromium-v0.2.0-dev0.zip
 
 jobs:
   build_validate:
@@ -290,12 +290,12 @@ jobs:
           mkdir -p "$runtime" "$artifacts"
           python release/build_runtime.py --output "$runtime"
           python release/build_macos.py --runtime "$runtime" --output "$artifacts" --architecture arm64
-          tar -tzf "$artifacts/ContextAtomizerLocal-macos-arm64-v0.1.0-dev0.tar.gz"
+          tar -tzf "$artifacts/ContextAtomizerLocal-macos-arm64-v0.2.0-dev0.tar.gz"
 
       - name: Exercise packaged user lifecycle and Library preservation
         shell: bash
         run: |
-          package="$RUNNER_TEMP/context-atomizer-macos-arm64/artifacts/ContextAtomizerLocal-macos-arm64-v0.1.0-dev0.tar.gz"
+          package="$RUNNER_TEMP/context-atomizer-macos-arm64/artifacts/ContextAtomizerLocal-macos-arm64-v0.2.0-dev0.tar.gz"
           extract="$RUNNER_TEMP/context-atomizer-macos-arm64/extracted"
           home="$RUNNER_TEMP/context-atomizer-macos-arm64/home"
           mkdir -p "$extract" "$home"
@@ -394,12 +394,12 @@ jobs:
           mkdir -p "$runtime" "$artifacts"
           python release/build_runtime.py --output "$runtime"
           python release/build_macos.py --runtime "$runtime" --output "$artifacts" --architecture x86_64
-          tar -tzf "$artifacts/ContextAtomizerLocal-macos-x86_64-v0.1.0-dev0.tar.gz"
+          tar -tzf "$artifacts/ContextAtomizerLocal-macos-x86_64-v0.2.0-dev0.tar.gz"
 
       - name: Exercise packaged user lifecycle and Library preservation
         shell: bash
         run: |
-          package="$RUNNER_TEMP/context-atomizer-macos-x86_64/artifacts/ContextAtomizerLocal-macos-x86_64-v0.1.0-dev0.tar.gz"
+          package="$RUNNER_TEMP/context-atomizer-macos-x86_64/artifacts/ContextAtomizerLocal-macos-x86_64-v0.2.0-dev0.tar.gz"
           extract="$RUNNER_TEMP/context-atomizer-macos-x86_64/extracted"
           home="$RUNNER_TEMP/context-atomizer-macos-x86_64/home"
           mkdir -p "$extract" "$home"
