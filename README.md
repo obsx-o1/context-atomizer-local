@@ -17,7 +17,7 @@ This repository is a development snapshot. It is not a hosted service, browser-s
 - Experimental unsigned macOS user-runtime artifacts and native architecture CI.
 - One read-only MCP 2026-07-28 Library server and an Agent Plugins 1.0 package for supported local hosts.
 - Human-selected `DIRECT_LOCAL`, `MANAGED_EXCLUSIVE`, and `DISABLED` Library access modes.
-- A generic, short-lived managed-authority seam with bounded native Codex and Claude Code `UserPromptSubmit` reinjection. A compatible separately verified manager is not included in this public repository.
+- A dedicated paired-manager channel and short-lived, runtime/scope/session/turn-bound managed lease with bounded native Codex and Claude Code `UserPromptSubmit` reinjection. The separate private authorization implementation is not included in this public repository.
 
 All capture, indexing, and retrieval in this repository remain on the local machine. The runtime binds to loopback and has no remote synchronization path. Automatic managed reinjection is supported only for native Codex and Claude Code hooks; browser managed reinjection is not supported.
 

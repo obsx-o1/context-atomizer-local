@@ -98,17 +98,29 @@ class ManagedIngress:
         if operation == "library/read":
             scope = payload.get("scope_reference")
             host = payload.get("host")
+            host_session = payload.get("host_session_reference")
+            host_turn = payload.get("host_turn_reference")
             name = payload.get("operation")
             arguments = payload.get("arguments", {})
             if (
                 not isinstance(host, str)
                 or not isinstance(scope, str)
+                or not isinstance(host_session, str)
+                or not isinstance(host_turn, str)
                 or not isinstance(name, str)
             ):
                 raise ValueError("managed Library operation binding is invalid")
             if not isinstance(arguments, dict):
                 raise ValueError("managed Library arguments must be an object")
-            return self.reader.call(capability, host, scope, name, arguments)
+            return self.reader.call(
+                capability,
+                host,
+                scope,
+                host_session,
+                host_turn,
+                name,
+                arguments,
+            )
         raise ValueError("unknown managed operation")
 
 

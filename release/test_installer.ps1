@@ -141,8 +141,10 @@ if (-not (Get-ItemProperty -LiteralPath $runKey -Name 'ContextAtomizerLocal' -Er
 }
 $managementCredential = Join-Path $dataDirectory 'management-credential.bin'
 $extensionCredential = Join-Path $dataDirectory 'extension-pairing.bin'
+$managedCredential = Join-Path $dataDirectory 'managed-connector.bin'
 if (-not (Test-Path -LiteralPath $managementCredential)) { throw 'DPAPI management credential was not initialized.' }
 if (Test-Path -LiteralPath $extensionCredential) { throw 'Fresh install created a pre-paired extension secret.' }
+if (Test-Path -LiteralPath $managedCredential) { throw 'Fresh install created a pre-paired manager secret.' }
 if (Test-Path -LiteralPath (Join-Path $dataDirectory 'bridge-credential.bin')) {
     throw 'Fresh install recreated the obsolete all-purpose bridge credential.'
 }
@@ -197,11 +199,15 @@ Write-Host "Lifecycle stage: $stage"
 $securityResult = Invoke-BoundedProcess -FilePath $pythonExecutable -ArgumentList $securityArguments -TimeoutSeconds 30 -ReportFailure
 if ($securityResult.ExitCode -ne 0) { throw 'Fresh-install packaged security acceptance failed.' }
 $freshSecurity = $securityResult.StandardOutput | ConvertFrom-Json
-if (-not $freshSecurity.management_initialized -or -not $freshSecurity.authority_separated) {
+if (-not $freshSecurity.management_initialized -or
+    -not $freshSecurity.authority_separated -or
+    -not $freshSecurity.manager_pairing_explicit -or
+    -not $freshSecurity.managed_channel_separated) {
     throw 'Fresh-install packaged security receipt was incomplete.'
 }
 $managementCredentialShaBefore = (Get-FileHash -LiteralPath $managementCredential -Algorithm SHA256).Hash
 $extensionCredentialShaBefore = (Get-FileHash -LiteralPath $extensionCredential -Algorithm SHA256).Hash
+$managedCredentialShaBefore = (Get-FileHash -LiteralPath $managedCredential -Algorithm SHA256).Hash
 
 $hooks = Get-Content -LiteralPath $hooksPath -Raw | ConvertFrom-Json
 if (-not $hooks.hooks.UserPromptSubmit -or -not $hooks.hooks.Stop) { throw 'Atomizer Codex hooks were not installed.' }
@@ -371,13 +377,18 @@ if ((Get-FileHash -LiteralPath $managementCredential -Algorithm SHA256).Hash -ne
 if ((Get-FileHash -LiteralPath $extensionCredential -Algorithm SHA256).Hash -ne $extensionCredentialShaBefore) {
     throw 'Ordinary reinstall rotated or replaced the paired extension secret.'
 }
+if ((Get-FileHash -LiteralPath $managedCredential -Algorithm SHA256).Hash -ne $managedCredentialShaBefore) {
+    throw 'Ordinary reinstall rotated or replaced the paired manager secret.'
+}
 $postSecurityArguments = '"{0}" post-reinstall --data-directory "{1}" --receipt "{2}"' -f $securityAcceptanceHelper,$dataDirectory,$Receipt
 $stage = 'post_reinstall_security_acceptance'
 Write-Host "Lifecycle stage: $stage"
 $postSecurityResult = Invoke-BoundedProcess -FilePath $pythonExecutable -ArgumentList $postSecurityArguments -TimeoutSeconds 30 -ReportFailure
 if ($postSecurityResult.ExitCode -ne 0) { throw 'Post-reinstall packaged security acceptance failed.' }
 $postSecurity = $postSecurityResult.StandardOutput | ConvertFrom-Json
-if (-not $postSecurity.management_preserved -or -not $postSecurity.revoke_invalidated_old_secret) {
+if (-not $postSecurity.management_preserved -or
+    -not $postSecurity.revoke_invalidated_old_secret -or
+    -not $postSecurity.manager_revoke_invalidated_old_secret) {
     throw 'Post-reinstall packaged security receipt was incomplete.'
 }
 $stage = 'post_reinstall_runtime_stop'
@@ -507,6 +518,7 @@ if (Get-ItemProperty -LiteralPath $runKey -Name 'ContextAtomizerLocal' -ErrorAct
 }
 if (Test-Path -LiteralPath $managementCredential) { throw 'Uninstall left the management credential behind.' }
 if (Test-Path -LiteralPath $extensionCredential) { throw 'Uninstall left the paired extension secret behind.' }
+if (Test-Path -LiteralPath $managedCredential) { throw 'Uninstall left the paired manager secret behind.' }
 foreach ($residue in @('runtime.json', 'permissions.json', 'runtime-state.json', 'runtime.lock', 'capture-errors.log')) {
     if (Test-Path -LiteralPath (Join-Path $dataDirectory $residue)) {
         throw "Uninstall left managed runtime residue: $residue"
@@ -559,7 +571,9 @@ $evidence = @{
     management_credential_initialized = $true
     extension_secret_absent_before_pairing = $true
     explicit_extension_pairing = $true
+    explicit_manager_pairing = $true
     management_extension_authority_separated = $true
+    managed_connector_authority_separated = $true
     hmac_and_replay_protection = $true
     synthetic_capture = $true
     derived_convergence = $true

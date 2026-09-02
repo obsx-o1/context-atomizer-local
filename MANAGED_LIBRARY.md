@@ -12,7 +12,11 @@ The mode is persisted outside the SQLite Library. A manager cannot select it, an
 
 ## Verified manager contract
 
-A configured verifier may return a generic managed session bound to the current runtime build, an opaque session reference, explicit workspace scopes, and a short expiry. The public default verifier rejects every assertion. Successful activation creates a separate high-entropy, in-memory manager capability used for privileged reads and context completion. No MCP argument can claim manager privilege.
+The user pairs a trusted local manager with a one-time code from the authenticated Library UI. Pairing creates a dedicated OS-protected `managed-connector.bin` secret; it does not reuse the browser, capture, Library-session, or management credentials. Managed requests use purpose-separated HMAC-SHA256 authentication over a canonical method, path, nonce, timestamp, and body digest. Request nonces and lease capability identifiers have bounded replay state.
+
+After the separate private authority boundary succeeds, the paired manager may present a short-lived `managed_library` lease. Local validates its HMAC and exact runtime-instance, runtime-build, manager-session, host-session, turn, scope, purpose, issue, expiry, and capability bindings. Successful activation creates a separate high-entropy, in-memory manager capability used for privileged reads and context completion. Expiry, request replay, lease replay, runtime restart, disconnect, scope drift, host-session drift, or turn drift fails closed. No MCP argument can claim manager privilege.
+
+The HMAC establishes only that the request came from the locally paired manager. It does not independently prove private work authorization. The paired private adapter is responsible for minting a lease only after its existing verification boundary has passed; Local does not receive or reproduce that private verification policy.
 
 Privileged reads route only to the existing `LibraryQueryService` operations. They do not add SQL, writes, a second retrieval engine, or vendor-specific retrieval.
 
@@ -31,4 +35,4 @@ Browser managed reinjection is not supported. Existing ChatGPT Web and Claude We
 
 ## Human controls
 
-The Library UI shows the current mode and managed-authority status, permits explicit mode changes, preserves project/chat/source inspection, revokes elected sources without deleting physical files, and exports canonical captured material as local JSON. General chat delete/forget remains unavailable because no canonical retention operation exists for it in this version.
+The Library UI shows the current mode, pairing state, and managed-authority status; issues bounded one-time pairing codes; revokes the trusted manager; permits explicit mode changes; preserves project/chat/source inspection; revokes elected sources without deleting physical files; and exports canonical captured material as local JSON. Revocation closes managed access but never changes `MANAGED_EXCLUSIVE` into `DIRECT_LOCAL`. General chat delete/forget remains unavailable because no canonical retention operation exists for it in this version.

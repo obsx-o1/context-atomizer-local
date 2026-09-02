@@ -151,7 +151,7 @@ if ((Test-Path -LiteralPath $applicationDirectory) -or (Test-Path -LiteralPath $
     throw 'Ambiguous quiet uninstall left product files, shortcut, or registration.'
 }
 if (Get-ItemProperty -LiteralPath $runKey -Name 'ContextAtomizerLocal' -ErrorAction SilentlyContinue) { throw 'Ambiguous quiet uninstall left startup registration.' }
-foreach ($residue in @('management-credential.bin','extension-pairing.bin','runtime.json','permissions.json','runtime-state.json','runtime.lock','capture-errors.log','logs')) {
+foreach ($residue in @('management-credential.bin','extension-pairing.bin','managed-connector.bin','runtime.json','permissions.json','runtime-state.json','runtime.lock','capture-errors.log','logs')) {
     if (Test-Path -LiteralPath (Join-Path $dataDirectory $residue)) { throw "Ambiguous quiet uninstall left managed residue: $residue" }
 }
 if (-not (Test-Path -LiteralPath $siblingMarker)) { throw 'Ambiguous quiet uninstall changed install-path sibling state.' }

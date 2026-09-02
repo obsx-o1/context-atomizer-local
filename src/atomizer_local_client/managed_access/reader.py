@@ -93,10 +93,17 @@ class ManagedLibraryReader:
         capability: str,
         host: str,
         scope_reference: str,
+        host_session_reference: str,
+        host_turn_reference: str,
         operation: str,
         arguments: dict[str, object],
     ) -> dict[str, Any]:
-        self.authority.require(capability, bound_scope(host, scope_reference))
+        self.authority.require(
+            capability,
+            bound_scope(host, scope_reference),
+            host_session_reference=host_session_reference,
+            host_turn_reference=host_turn_reference,
+        )
         if operation not in _OPERATIONS:
             raise ValueError("unknown managed Library operation")
         if not isinstance(arguments, dict):

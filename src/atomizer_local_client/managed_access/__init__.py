@@ -4,10 +4,14 @@ from atomizer_local_client.managed_access.authority import (
     ManagedAuthorityRegistry,
     VerifiedManagedSession,
 )
+from atomizer_local_client.managed_access.capability import (
+    AuthenticatedManagedAssertionVerifier,
+)
 from atomizer_local_client.managed_access.policy import LibraryAccessPolicyStore
 
 __all__ = [
     "LibraryAccessPolicyStore",
+    "AuthenticatedManagedAssertionVerifier",
     "ManagedAuthorityRegistry",
     "VerifiedManagedSession",
 ]

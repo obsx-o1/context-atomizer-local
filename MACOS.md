@@ -13,9 +13,9 @@ SQLite, migrations, retrieval, pairing, HMAC/replay, and local security policy
 remain the same implementation used on Windows.
 
 The same full Python suite is configured on both native lanes to cover persisted managed-access
-policy, fake verified-manager activation, privileged read isolation, lease
-expiry/disconnect, and Codex/Claude hook formatting. No real private manager or
-human native-host session is claimed by those tests.
+policy, dedicated manager pairing and authenticated lease validation, privileged read isolation,
+lease expiry/replay/disconnect, and Codex/Claude hook formatting. No private authority implementation
+or human native-host session is claimed by those tests.
 
 ## Current platform decisions
 

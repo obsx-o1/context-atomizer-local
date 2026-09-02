@@ -492,6 +492,10 @@ class LifecycleManager:
             self.paths.extension_credential,
             description="Context Atomizer Local extension pairing secret",
         ).remove()
+        current_credential_store(
+            self.paths.managed_credential,
+            description="Context Atomizer Local managed connector secret",
+        ).remove()
         self.paths.config.unlink(missing_ok=True)
         self.paths.permissions.unlink(missing_ok=True)
         self.paths.access_policy.unlink(missing_ok=True)

@@ -32,6 +32,12 @@ from atomizer_local_client.local_auth.request_auth import (
     CaptureRequestVerifier,
     runtime_proof,
 )
+from atomizer_local_client.managed_access.request_auth import (
+    MANAGED_PAIRING_DOMAIN,
+    MANAGED_PROTOCOL_VERSION,
+    ManagedRequestAuthentication,
+    ManagedRequestVerifier,
+)
 from atomizer_local_client.runtime.permissions import PermissionStore
 from atomizer_local_client.runtime_health import RuntimeIdentity, database_health
 
@@ -66,6 +72,8 @@ class LocalIngressServer(ThreadingHTTPServer):
         extension_seen_callback: Callable[[str], None] | None = None,
         integration_enabled: Callable[[str], bool] | None = None,
         managed_ingress: object | None = None,
+        managed_pairing_authority: ExtensionPairingAuthority | None = None,
+        managed_request_verifier: ManagedRequestVerifier | None = None,
         _test_port: int | None = None,
     ) -> None:
         if len(management_token) < 32:
@@ -83,6 +91,10 @@ class LocalIngressServer(ThreadingHTTPServer):
         self.extension_seen_callback = extension_seen_callback
         self.integration_enabled = integration_enabled or (lambda integration: True)
         self.managed_ingress = managed_ingress
+        self.managed_pairing_authority = managed_pairing_authority
+        self.managed_request_verifier = (
+            managed_request_verifier or ManagedRequestVerifier()
+        )
         bind_port = BRIDGE_PORT if _test_port is None else int(_test_port)
         super().__init__(("127.0.0.1", bind_port), LocalIngressHandler)
 
@@ -129,14 +141,36 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
         expected = f"Bearer {self.server.management_token}"
         return hmac.compare_digest(supplied, expected)
 
+    def _managed_authorized(self, *, method: str, body: bytes) -> bool:
+        pairing = self.server.managed_pairing_authority
+        secret = pairing.secret() if pairing is not None else None
+        if secret is None:
+            return False
+        authentication = ManagedRequestAuthentication(
+            protocol_version=self.headers.get("X-Atomizer-Managed-Protocol", ""),
+            nonce=self.headers.get("X-Atomizer-Managed-Nonce", ""),
+            timestamp=self.headers.get("X-Atomizer-Managed-Timestamp", ""),
+            body_sha256=self.headers.get(
+                "X-Atomizer-Managed-Content-SHA256", ""
+            ),
+            signature=self.headers.get("X-Atomizer-Managed-Signature", ""),
+        )
+        return self.server.managed_request_verifier.verify(
+            secret,
+            method=method,
+            operation=self.path,
+            body=body,
+            authentication=authentication,
+        )
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler contract
         if self.path not in {"/v1/management/status", "/v1/managed/status"}:
             self._json_response(HTTPStatus.NOT_FOUND, {"ok": False})
             return
-        if not self._management_authorized():
-            self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
-            return
         if self.path == "/v1/managed/status":
+            if not self._managed_authorized(method="GET", body=b""):
+                self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
+                return
             provider = self.server.managed_ingress
             if provider is None:
                 self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
@@ -145,6 +179,9 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
                 self._json_response(HTTPStatus.OK, provider.status())
             except (ValueError, OSError):
                 self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+            return
+        if not self._management_authorized():
+            self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
             return
         provider = self.server.management_status_provider
         if provider is None:
@@ -158,6 +195,9 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/pair":
             self._pair()
+            return
+        if self.path == "/v1/managed/pair":
+            self._pair_managed()
             return
         if self.path == "/v1/runtime-proof":
             self._prove_runtime()
@@ -225,6 +265,49 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
                 "port": BRIDGE_PORT,
                 "challengeNonce": nonce,
                 "proof": proof,
+            },
+        )
+
+    def _pair_managed(self) -> None:
+        pairing = self.server.managed_pairing_authority
+        if pairing is None:
+            self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+            return
+        try:
+            payload = self._object(self._read_body(_MAX_CONTROL_BYTES))
+            if (
+                payload.get("protocol_version") != MANAGED_PROTOCOL_VERSION
+                or payload.get("pairing_domain") != MANAGED_PAIRING_DOMAIN
+            ):
+                raise PermissionError("unsupported managed pairing protocol")
+            code = payload.get("pairing_code")
+            if not isinstance(code, str):
+                raise PermissionError("managed pairing code was rejected")
+            secret = pairing.pair(code)
+            provider = self.server.managed_ingress
+            if provider is None:
+                raise RuntimeError("managed ingress is unavailable")
+            status = provider.status()
+        except PairingRateLimited:
+            self._json_response(HTTPStatus.TOO_MANY_REQUESTS, {"ok": False})
+            return
+        except (PermissionError, ValueError, UnicodeError, json.JSONDecodeError):
+            self._json_response(HTTPStatus.FORBIDDEN, {"ok": False})
+            return
+        except BaseException:
+            self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
+            return
+        self._json_response(
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "protocol_version": MANAGED_PROTOCOL_VERSION,
+                "pairing_domain": MANAGED_PAIRING_DOMAIN,
+                "managed_connector_secret": secret,
+                "runtime_build": status.get("authority", {}).get("runtime_build"),
+                "runtime_instance_reference": status.get("authority", {}).get(
+                    "runtime_instance_reference"
+                ),
             },
         )
 
@@ -326,15 +409,20 @@ class LocalIngressHandler(BaseHTTPRequestHandler):
         self._json_response(HTTPStatus.OK, {"ok": True, "url": provider()})
 
     def _managed_action(self) -> None:
-        if not self._management_authorized():
-            self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
-            return
         provider = self.server.managed_ingress
         if provider is None:
             self._json_response(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False})
             return
         try:
-            payload = self._object(self._read_body(_MAX_MANAGED_BYTES))
+            raw = self._read_body(_MAX_MANAGED_BYTES)
+            authorized = (
+                self.path == "/v1/managed/context/request"
+                and self._management_authorized()
+            ) or self._managed_authorized(method="POST", body=raw)
+            if not authorized:
+                self._json_response(HTTPStatus.UNAUTHORIZED, {"ok": False})
+                return
+            payload = self._object(raw)
             result = provider.post(self.path, payload)
         except PermissionError:
             self._json_response(HTTPStatus.FORBIDDEN, {"ok": False})

@@ -15,7 +15,7 @@ python -m venv .venv
 
 The setup flow creates local runtime state under the current user profile. Codex integration is optional and explicit. The browser extension is loaded unpacked from a package produced by `release/build_browser.py`.
 
-Claude Code capture is also optional and explicit. Standalone read-only memory uses the installed `atomizer-local-mcp` command through the portable plugin mappings. The Library UI controls direct, managed-exclusive, and disabled access. Managed-exclusive mode requires a compatible separately verified manager; selecting the mode alone grants no manager authority.
+Claude Code capture is also optional and explicit. Standalone read-only memory uses the installed `atomizer-local-mcp` command through the portable plugin mappings. The Library UI controls direct, managed-exclusive, and disabled access. Managed-exclusive mode requires a compatible separately verified manager; selecting the mode alone grants no manager authority. Pair that manager with the separate **Create manager pairing code** control; revoking it closes managed access without reopening direct MCP reads.
 
 After loading the extension, open Library through the Start Menu shortcut, select **Create one-time pairing code**, and paste that code into the extension options page. Pairing normally occurs only on first setup, after explicit revocation, after an extension-profile reset, or after credential recovery. Ordinary capture then authenticates automatically; the paired secret is not rotated for every message.
 

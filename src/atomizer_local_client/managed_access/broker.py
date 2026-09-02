@@ -75,16 +75,22 @@ class ManagedContextBroker:
             raise PermissionError("verified managed authority is unavailable")
         scope = _text(payload.get("scope_reference"), "scope_reference", 256)
         host = _text(payload.get("host"), "host", 64)
-        session = self.authority.session_for_scope(bound_scope(host, scope))
+        host_session_reference = _text(
+            payload.get("host_session_reference"), "host_session_reference", 256
+        )
+        host_turn_reference = _text(
+            payload.get("host_turn_reference"), "host_turn_reference", 256
+        )
+        session = self.authority.session_for_scope(
+            bound_scope(host, scope),
+            host_session_reference=host_session_reference,
+            host_turn_reference=host_turn_reference,
+        )
         pending = _PendingContext(
             request_id=secrets.token_urlsafe(24),
             host=host,
-            host_session_reference=_text(
-                payload.get("host_session_reference"), "host_session_reference", 256
-            ),
-            host_turn_reference=_text(
-                payload.get("host_turn_reference"), "host_turn_reference", 256
-            ),
+            host_session_reference=host_session_reference,
+            host_turn_reference=host_turn_reference,
             scope_reference=scope,
             prompt=_text(payload.get("prompt"), "prompt", MAX_PROMPT_CHARACTERS),
             manager_session_reference=lease.session_reference,
@@ -120,6 +126,9 @@ class ManagedContextBroker:
                     if (
                         not pending.assigned
                         and pending.manager_session_reference == session.session_reference
+                        and pending.host_session_reference
+                        == session.host_session_reference
+                        and pending.host_turn_reference == session.host_turn_reference
                     ):
                         pending.assigned = True
                         return {"status": "available", "request": pending.public_mapping()}
@@ -136,7 +145,10 @@ class ManagedContextBroker:
             if pending is None or pending.result is not None:
                 raise PermissionError("managed context request is stale or replayed")
             session = self.authority.require(
-                capability, bound_scope(pending.host, scope)
+                capability,
+                bound_scope(pending.host, scope),
+                host_session_reference=pending.host_session_reference,
+                host_turn_reference=pending.host_turn_reference,
             )
             checks = {
                 "manager session": pending.manager_session_reference

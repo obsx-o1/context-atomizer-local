@@ -63,6 +63,7 @@ if ($snapshotAfter.logical_fingerprint -ne $snapshotBefore.logical_fingerprint) 
 $startupResidual = [bool](Get-ItemProperty -LiteralPath $runKey -Name 'ContextAtomizerLocal' -ErrorAction SilentlyContinue)
 $credentialResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'management-credential.bin')
 $extensionCredentialResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'extension-pairing.bin')
+$managedCredentialResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'managed-connector.bin')
 $configResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'runtime.json')
 $permissionsResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'permissions.json')
 $stateResidual = Test-Path -LiteralPath (Join-Path $dataDirectory 'runtime-state.json')
@@ -79,6 +80,7 @@ $evidence += @{
     manager_owned_startup_residual_expected = $startupResidual
     manager_owned_credential_residual_expected = $credentialResidual
     manager_owned_extension_credential_residual = $extensionCredentialResidual
+    manager_owned_managed_credential_residual = $managedCredentialResidual
     manager_owned_config_residual = $configResidual
     manager_owned_permissions_residual = $permissionsResidual
     manager_owned_state_residual = $stateResidual

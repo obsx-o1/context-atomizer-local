@@ -34,6 +34,11 @@ from atomizer_local_client.local_auth.contracts import (  # noqa: E402
     sign_hex,
 )
 from atomizer_local_client.local_auth.request_auth import runtime_proof  # noqa: E402
+from atomizer_local_client.managed_access.request_auth import (  # noqa: E402
+    MANAGED_PAIRING_DOMAIN,
+    MANAGED_PROTOCOL_VERSION,
+    managed_request_headers,
+)
 from atomizer_local_client.runtime.configuration import RuntimePaths  # noqa: E402
 from atomizer_local_client.runtime.credentials import CredentialStore  # noqa: E402
 
@@ -237,6 +242,68 @@ def pair_extension(
     return extension
 
 
+def pair_manager(
+    bridge: str,
+    library: str,
+    opener: urllib.request.OpenerDirector,
+    csrf: str,
+) -> str:
+    status, pairing_page = form_request(
+        opener,
+        library,
+        "/managed/pairing-code",
+        {"csrf_token": csrf},
+    )
+    require(status == 200, "Library could not issue a manager pairing code")
+    match = _PAIRING_CODE.search(pairing_page)
+    require(match is not None, "Library did not render the manager pairing code")
+    code = html.unescape(match.group(1))
+    status, paired = json_request(
+        bridge + "/v1/managed/pair",
+        payload={
+            "protocol_version": MANAGED_PROTOCOL_VERSION,
+            "pairing_domain": MANAGED_PAIRING_DOMAIN,
+            "pairing_code": code,
+        },
+    )
+    require(status == 200, "explicit managed connector pairing failed")
+    manager = paired.get("managed_connector_secret")
+    require(isinstance(manager, str) and _TOKEN.fullmatch(manager) is not None,
+            "paired manager secret did not meet the production token contract")
+    replay, _ = json_request(
+        bridge + "/v1/managed/pair",
+        payload={
+            "protocol_version": MANAGED_PROTOCOL_VERSION,
+            "pairing_domain": MANAGED_PAIRING_DOMAIN,
+            "pairing_code": code,
+        },
+    )
+    require(replay == 403, "one-time managed pairing code was reusable")
+    return manager
+
+
+def managed_request(
+    bridge: str,
+    secret: str,
+    path: str,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    method = "GET" if payload is None else "POST"
+    body = b"" if payload is None else json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    status, raw, _ = request(
+        bridge + path,
+        data=None if method == "GET" else body,
+        headers={
+            **managed_request_headers(
+                secret, method=method, operation=path, body=body
+            ),
+            "Content-Type": "application/json",
+        },
+    )
+    return status, json.loads(raw.decode("utf-8"))
+
+
 def assert_runtime_proof(bridge: str, extension: str) -> None:
     challenge = secrets.token_urlsafe(24)
     status, proof = json_request(
@@ -312,10 +379,14 @@ def fresh(data_directory: Path, receipt: Path) -> dict[str, bool]:
             "production management credential path contract changed")
     require(paths.extension_credential.name == "extension-pairing.bin",
             "production extension credential path contract changed")
+    require(paths.managed_credential.name == "managed-connector.bin",
+            "production managed credential path contract changed")
     require(not (paths.app_data / "bridge-credential.bin").exists(),
             "obsolete all-purpose bridge credential was recreated")
     require(not paths.extension_credential.exists(),
             "fresh install created a pre-paired extension secret")
+    require(not paths.managed_credential.exists(),
+            "fresh install created a pre-paired manager secret")
     persisted = paths.config.read_text(encoding="utf-8") + paths.state.read_text(encoding="utf-8")
     require(all(term not in persisted for term in ("pairingCode", "launchToken", "librarySession")),
             "ephemeral pairing or Library authority was persisted")
@@ -353,6 +424,43 @@ def fresh(data_directory: Path, receipt: Path) -> dict[str, bool]:
     require(extension != management, "management and capture credentials were interchangeable")
     require(extension.encode("ascii") not in paths.extension_credential.read_bytes(),
             "extension pairing secret was stored in plaintext")
+    manager = pair_manager(bridge, library, opener, csrf)
+    require(paths.managed_credential.is_file(),
+            "manager pairing did not persist the managed connector secret")
+    stored_manager = CredentialStore(
+        paths.managed_credential,
+        description="Context Atomizer Local managed connector secret",
+    ).load()
+    require(stored_manager == manager,
+            "paired response and protected managed connector store diverged")
+    require(manager not in {management, extension},
+            "managed connector credential was interchangeable")
+    require(manager.encode("ascii") not in paths.managed_credential.read_bytes(),
+            "managed connector secret was stored in plaintext")
+    managed_status_code, _ = managed_request(
+        bridge, manager, "/v1/managed/status"
+    )
+    require(managed_status_code == 200,
+            "paired manager could not authenticate its dedicated channel")
+    generic_managed, _ = json_request(
+        bridge + "/v1/managed/status",
+        headers={"Authorization": f"Bearer {management}"},
+    )
+    require(generic_managed == 401,
+            "generic management credential authenticated the manager channel")
+    browser_managed, _ = managed_request(
+        bridge, extension, "/v1/managed/status"
+    )
+    require(browser_managed == 401,
+            "browser pairing secret authenticated the manager channel")
+    forged_activation, _ = managed_request(
+        bridge,
+        manager,
+        "/v1/managed/authority/activate",
+        payload={"assertion": {"verified": True}},
+    )
+    require(forged_activation == 403,
+            "paired manager bypassed active private authorization with JSON")
     assert_runtime_proof(bridge, extension)
     capture_status, capture = signed_capture(
         bridge, extension, event_id="installer-packaged-security-fresh"
@@ -364,7 +472,7 @@ def fresh(data_directory: Path, receipt: Path) -> dict[str, bool]:
     )
     require(management_capture == 401, "management credential authenticated extension capture")
     assert_extension_cannot_manage(bridge, library, extension)
-    assert_no_secret_disclosure(paths, receipt, [management, extension])
+    assert_no_secret_disclosure(paths, receipt, [management, extension, manager])
     return {
         "management_initialized": True,
         "management_dpapi_protected": True,
@@ -373,6 +481,8 @@ def fresh(data_directory: Path, receipt: Path) -> dict[str, bool]:
         "bootstrap_removed": True,
         "library_session_one_time": True,
         "extension_pairing_explicit": True,
+        "manager_pairing_explicit": True,
+        "managed_channel_separated": True,
         "authenticated_capture": True,
         "authority_separated": True,
         "secrets_not_disclosed": True,
@@ -382,15 +492,25 @@ def fresh(data_directory: Path, receipt: Path) -> dict[str, bool]:
 def post_reinstall(data_directory: Path, receipt: Path) -> dict[str, bool]:
     paths, bridge, library, management = load_context(data_directory)
     require(paths.extension_credential.is_file(), "reinstall removed the paired extension secret")
+    require(paths.managed_credential.is_file(), "reinstall removed the paired manager secret")
     store = CredentialStore(
         paths.extension_credential,
         description="Context Atomizer Local extension pairing secret",
     )
     old_extension = store.load()
+    manager_store = CredentialStore(
+        paths.managed_credential,
+        description="Context Atomizer Local managed connector secret",
+    )
+    old_manager = manager_store.load()
     status = management_status(bridge, management)
     require(status["extension"]["paired"] is True, "reinstall lost paired extension state")
     assert_runtime_proof(bridge, old_extension)
     assert_extension_cannot_manage(bridge, library, old_extension)
+    manager_status, _ = managed_request(
+        bridge, old_manager, "/v1/managed/status"
+    )
+    require(manager_status == 200, "reinstall lost paired manager state")
 
     opener, csrf = library_session(bridge, library, management)
     revoke, _ = form_request(
@@ -405,14 +525,36 @@ def post_reinstall(data_directory: Path, receipt: Path) -> dict[str, bool]:
     require(management_status(bridge, management)["extension"]["paired"] is False,
             "revoked extension remained paired in runtime status")
 
+    managed_revoke, _ = form_request(
+        opener, library, "/managed/revoke", {"csrf_token": csrf}
+    )
+    require(managed_revoke == 200, "Library session could not revoke manager pairing")
+    require(not paths.managed_credential.exists(),
+            "manager revoke left the managed connector secret at rest")
+    old_manager_status, _ = managed_request(
+        bridge, old_manager, "/v1/managed/status"
+    )
+    require(old_manager_status == 401,
+            "revoked manager secret still authenticated the manager channel")
+
     new_extension = pair_extension(bridge, library, opener, csrf)
     require(new_extension != old_extension, "re-pair reused the revoked extension secret")
     require(paths.extension_credential.is_file(), "re-pair did not restore protected extension state")
+    new_manager = pair_manager(bridge, library, opener, csrf)
+    require(new_manager != old_manager, "manager re-pair reused the revoked secret")
+    require(paths.managed_credential.is_file(),
+            "manager re-pair did not restore protected state")
     assert_runtime_proof(bridge, new_extension)
-    assert_no_secret_disclosure(paths, receipt, [management, old_extension, new_extension])
+    assert_no_secret_disclosure(
+        paths,
+        receipt,
+        [management, old_extension, new_extension, old_manager, new_manager],
+    )
     return {
         "management_preserved": True,
         "extension_pairing_preserved": True,
+        "manager_pairing_preserved": True,
+        "manager_revoke_invalidated_old_secret": True,
         "revoke_invalidated_old_secret": True,
         "re_pair_required": True,
         "uninstall_cleanup_precondition": True,

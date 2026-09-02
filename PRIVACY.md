@@ -10,6 +10,8 @@ Claude Code capture uses the same two documented hook events and the same local 
 
 In managed-exclusive mode, the original human prompt is captured first. A bounded request may then be exchanged in memory with a separately verified local manager and returned as host-native additional context. That context is not written as a human message, is not fed back through the ingestion path, and is not written to diagnostics. Pending prompt/context exchange state is memory-only and disappears on completion, timeout, disconnect, or runtime exit.
 
+The managed boundary receives only a purpose, opaque manager/host-session/turn references, a permitted local scope reference, runtime bindings, issue/expiry times, and replay identity. It does not receive private packages, evidence bundles, compilation artifacts, signing metadata, authorization policy, routing, or provider state.
+
 When ChatGPT Web capture is enabled, the browser extension reads visible conversation messages. It also observes visible sidebar conversation titles and project associations so an existing local chat can receive its human-readable title. Captured content and retained title/project observations are sent only to the paired loopback runtime.
 
 The current ChatGPT Web surface does not provide a stable, locally verified signal that reliably identifies Temporary Chat. When ChatGPT Web capture is enabled, a Temporary Chat may therefore be captured into the user's local Library; the product does not pretend otherwise or rely on fragile inference. Users who do not want a Temporary Chat retained locally should disable or pause ChatGPT Web capture before using it.
@@ -32,6 +34,6 @@ For each elected document, the current version and at most the 10 newest histori
 
 ## Uninstall
 
-Uninstall removes runtime startup registration, management and extension credentials, product configuration and permissions, runtime state and lock files, the Start Menu shortcut, runtime logs, `capture-errors.log`, application binaries, and Atomizer-owned Codex hooks that can be identified safely. Ambiguous Codex hooks are preserved and reported as partial cleanup; they do not block core product cleanup.
+Uninstall removes runtime startup registration, management, extension, and managed-connector credentials, product configuration and permissions, runtime state and lock files, the Start Menu shortcut, runtime logs, `capture-errors.log`, application binaries, and Atomizer-owned Codex hooks that can be identified safely. Ambiguous Codex hooks are preserved and reported as partial cleanup; they do not block core product cleanup.
 
 The SQLite Library database is preserved unconditionally by the product uninstaller. There is no uninstall-time choice that deletes Library data. Deleting that retained database is a separate user action.

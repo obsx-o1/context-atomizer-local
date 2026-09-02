@@ -504,7 +504,9 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         self.assertNotIn("$credential = Join-Path $dataDirectory 'bridge-credential.bin'", script)
         self.assertIn("management-credential.bin", script)
         self.assertIn("extension-pairing.bin", script)
+        self.assertIn("managed-connector.bin", script)
         self.assertIn("Fresh install created a pre-paired extension secret.", script)
+        self.assertIn("Fresh install created a pre-paired manager secret.", script)
         self.assertIn("post-reinstall --data-directory", script)
         self.assertIn("credentials_preserved_across_reinstall = $true", script)
         self.assertIn("credentials_removed_on_uninstall = $true", script)
@@ -516,6 +518,17 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
         self.assertIn('bridge + "/v1/bootstrap"', helper)
         self.assertIn('"/v1/runtime/stop"', helper)
         self.assertIn('library, "/extension/revoke"', helper)
+        self.assertIn('library, "/managed/revoke"', helper)
+        self.assertIn('bridge + "/v1/managed/pair"', helper)
+        self.assertIn("CredentialStore(\n        paths.managed_credential", helper)
+        ambiguous = (
+            PACKAGE_ROOT / "release" / "test_installer_ambiguous.ps1"
+        ).read_text(encoding="utf-8")
+        failure = (
+            PACKAGE_ROOT / "release" / "test_installer_failure.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("managed-connector.bin", ambiguous)
+        self.assertIn("managed-connector.bin", failure)
         self.assertNotIn("print(management", helper)
         self.assertNotIn("print(extension", helper)
 

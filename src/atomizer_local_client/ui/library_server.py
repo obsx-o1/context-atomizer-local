@@ -78,6 +78,8 @@ class LibraryViewServer(ThreadingHTTPServer):
         pairing_revoke_callback: Callable[[], None] | None = None,
         access_policy: LibraryAccessPolicyStore | None = None,
         managed_status_provider: Callable[[], dict[str, object]] | None = None,
+        managed_pairing_code_provider: Callable[[], str] | None = None,
+        managed_pairing_revoke_callback: Callable[[], None] | None = None,
         access_mode_setter: Callable[[str], DirectLibraryAccessMode] | None = None,
     ) -> None:
         self.database_path = Path(database_path)
@@ -94,6 +96,8 @@ class LibraryViewServer(ThreadingHTTPServer):
             self.database_path.parent / "library-access-policy.json"
         )
         self.managed_status_provider = managed_status_provider
+        self.managed_pairing_code_provider = managed_pairing_code_provider
+        self.managed_pairing_revoke_callback = managed_pairing_revoke_callback
         self.access_mode_setter = access_mode_setter or self.access_policy.set_mode
         self.csrf_token = csrf_token or secrets.token_urlsafe(32)
         self.automatic_maintenance_enabled = automatic_maintenance
@@ -447,6 +451,30 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                 self._redirect(
                     "/permissions",
                     status="Browser extension pairing was revoked.",
+                )
+                return
+            if parsed.path == "/managed/pairing-code":
+                if self.server.managed_pairing_code_provider is None:
+                    raise RuntimeError("managed connector pairing is unavailable")
+                code = self.server.managed_pairing_code_provider()
+                self._html(
+                    render_permissions(
+                        self.server.permission_store.snapshot(),
+                        self.server.health_snapshot()["extension"],
+                        self.server.csrf_token,
+                        access=self.server.health_snapshot()["library_access"],
+                        managed_pairing_code=code,
+                        status="A new one-time managed connector pairing code was created.",
+                    )
+                )
+                return
+            if parsed.path == "/managed/revoke":
+                if self.server.managed_pairing_revoke_callback is None:
+                    raise RuntimeError("managed connector pairing is unavailable")
+                self.server.managed_pairing_revoke_callback()
+                self._redirect(
+                    "/permissions",
+                    status="Trusted manager pairing was revoked.",
                 )
                 return
             if parsed.path == "/integration/set":

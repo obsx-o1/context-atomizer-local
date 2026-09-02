@@ -14,4 +14,4 @@
 
 ChatGPT page structure is not a stable public API. Browser capture may require maintenance when the host UI changes.
 
-Standalone `DIRECT_LOCAL` memory is tool based and never auto-injected. Native automatic context is attempted only in `MANAGED_EXCLUSIVE` mode while a separately verified, unexpired, scope-bound manager lease is active. Loss or expiry of that lease fails closed and does not reopen direct MCP access. The public package defines the generic boundary but does not contain a private authority verifier.
+Standalone `DIRECT_LOCAL` memory is tool based and never auto-injected. Native automatic context is attempted only in `MANAGED_EXCLUSIVE` mode while a paired, separately verified, unexpired, runtime/scope/session/turn-bound manager lease is active. Loss, revocation, disconnect, expiry, or replay failure closes managed access and does not reopen direct MCP access. The public package authenticates the local paired channel but does not contain the private authority verifier or its artifacts.

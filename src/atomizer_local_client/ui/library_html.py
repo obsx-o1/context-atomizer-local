@@ -129,6 +129,7 @@ def render_permissions(
     *,
     status: str | None = None,
     pairing_code: str | None = None,
+    managed_pairing_code: str | None = None,
     access: dict[str, Any] | None = None,
 ) -> bytes:
     def integration_card(
@@ -185,6 +186,28 @@ def render_permissions(
     authority_active = bool(
         isinstance(authority, dict) and authority.get("verified_active")
     )
+    manager_paired = bool(
+        isinstance(authority, dict) and authority.get("paired")
+    )
+    managed_pairing_html = (
+        "<p>Provide this one-time code only to the local private manager within five minutes:</p>"
+        f"<p><code>{escape(managed_pairing_code)}</code></p>"
+        if managed_pairing_code
+        else ""
+    )
+    managed_pairing_controls = (
+        "<section class='panel'><h2>Trusted manager pairing</h2>"
+        f"<p><span class='pill'>{'Paired' if manager_paired else 'Not paired'}</span></p>"
+        + managed_pairing_html
+        + "<div class='grid'><form method='post' action='/managed/pairing-code'>"
+        f"<input type='hidden' name='csrf_token' value='{escape(csrf_token, quote=True)}'>"
+        "<button type='submit'>Create manager pairing code</button></form>"
+        "<form method='post' action='/managed/revoke'>"
+        f"<input type='hidden' name='csrf_token' value='{escape(csrf_token, quote=True)}'>"
+        "<button class='danger' type='submit'>Revoke trusted manager</button></form></div>"
+        "<p class='meta'>The dedicated connector secret is OS protected and is never displayed here. "
+        "Revocation closes active managed access without changing the selected Library mode.</p></section>"
+    )
     access_controls = [
         "<section class='panel'><h2>Library access mode</h2>",
         f"<p><span class='pill'>{escape(str(access_state.get('mode', 'UNKNOWN')))}</span> "
@@ -216,6 +239,7 @@ def render_permissions(
         + integration_card("claude_code", "Claude Code", "Hook", claude_hook)
         + "</section>"
         + pairing_controls
+        + managed_pairing_controls
         + "".join(access_controls)
         + "<section class='panel'><h2>Export captured material</h2>"
         "<p>Download canonical captured projects, chats, messages, elected documents, source registrations, and document revisions as local JSON.</p>"
