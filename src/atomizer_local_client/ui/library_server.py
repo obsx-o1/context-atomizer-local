@@ -26,6 +26,12 @@ from atomizer_local_client.library.document_registry import (
 )
 from atomizer_local_client.library.source_maintenance import AutomaticSourceMaintainer
 from atomizer_local_client.library.export_service import export_captured_library
+from atomizer_local_client.library.chat_forgetting import (
+    ForgetOperationError,
+    allow_recapture,
+    forget_chat,
+    list_forget_tombstones,
+)
 from atomizer_local_client.derived_state.maintenance import AutomaticDerivedStateMaintainer
 from atomizer_local_client.runtime_health import RuntimeIdentity, bridge_reachable, database_health
 from atomizer_local_client.runtime.permissions import PermissionStore
@@ -375,7 +381,12 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/chat":
                 chat_id = self._single(parameters, "chat_id")
-                self._html(render_chat(read_chat_view(self.server.database_path, chat_id)))
+                self._html(
+                    render_chat(
+                        read_chat_view(self.server.database_path, chat_id),
+                        self.server.csrf_token,
+                    )
+                )
                 return
             if parsed.path == "/document":
                 document_id = self._single(parameters, "document_id")
@@ -408,6 +419,7 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                         self.server.health_snapshot()["extension"],
                         self.server.csrf_token,
                         access=self.server.health_snapshot()["library_access"],
+                        tombstones=list_forget_tombstones(self.server.database_path),
                         status=status,
                     )
                 )
@@ -439,6 +451,7 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                         self.server.health_snapshot()["extension"],
                         self.server.csrf_token,
                         access=self.server.health_snapshot()["library_access"],
+                        tombstones=list_forget_tombstones(self.server.database_path),
                         pairing_code=code,
                         status="A new one-time pairing code was created.",
                     )
@@ -463,6 +476,7 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                         self.server.health_snapshot()["extension"],
                         self.server.csrf_token,
                         access=self.server.health_snapshot()["library_access"],
+                        tombstones=list_forget_tombstones(self.server.database_path),
                         managed_pairing_code=code,
                         status="A new one-time managed connector pairing code was created.",
                     )
@@ -504,6 +518,35 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
                     status=(
                         f"Library access mode is {mode.value}. "
                         "Changing mode does not grant managed authority."
+                    ),
+                )
+                return
+            if parsed.path == "/chat/forget":
+                if self._single(form, "confirm") != "permanently-forget":
+                    raise ValueError("permanent Chat forgetting must be confirmed")
+                chat_id = self._single(form, "chat_id")
+                with self.server.source_operation_lock:
+                    result = forget_chat(self.server.database_path, chat_id)
+                if result.status == "not_found":
+                    raise KeyError(chat_id)
+                status = (
+                    "Chat was already permanently removed and remains blocked from recapture."
+                    if result.status == "already_forgotten"
+                    else "Chat permanently removed from the local Library. Automatic recapture remains blocked."
+                )
+                self._redirect("/", status=status)
+                return
+            if parsed.path == "/chat/allow-recapture":
+                if self._single(form, "confirm") != "allow-recapture":
+                    raise ValueError("future Chat recapture permission must be confirmed")
+                group = self._single(form, "tombstone_id")
+                with self.server.source_operation_lock:
+                    if not allow_recapture(self.server.database_path, group):
+                        raise KeyError(group)
+                self._redirect(
+                    "/permissions",
+                    status=(
+                        "Future fresh capture is now allowed. Deleted Chat content was not restored."
                     ),
                 )
                 return
@@ -562,6 +605,8 @@ class LibraryViewHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.FORBIDDEN, "The local form token was rejected.")
         except KeyError:
             self._error(HTTPStatus.NOT_FOUND, "The requested local Library source does not exist.")
+        except ForgetOperationError as error:
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(error))
         except (OSError, UnicodeError, ValueError) as error:
             self._error(HTTPStatus.BAD_REQUEST, str(error))
 

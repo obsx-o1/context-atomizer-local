@@ -54,3 +54,23 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
             + f"VALUES ('{safe_version}', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));\n"
             + "COMMIT;"
         )
+    # SQLite has no built-in SHA-256 function. Backfill only deterministic,
+    # content-free identity digests after the schema migration is committed.
+    from atomizer_local_client.chats.identity import (
+        current_chat_aliases_complete,
+        ensure_current_chat_aliases,
+    )
+
+    if current_chat_aliases_complete(connection):
+        return
+    if connection.in_transaction:
+        ensure_current_chat_aliases(connection)
+        return
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        ensure_current_chat_aliases(connection)
+    except BaseException:
+        connection.rollback()
+        raise
+    else:
+        connection.commit()

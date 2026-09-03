@@ -22,11 +22,19 @@ The extension is paired explicitly from an authenticated Library session with a 
 
 Revoking the pairing in Library deletes the runtime copy and future browser capture fails until the user pairs again. Malware already running with the full authority of the same Windows user may be able to read browser-profile state; this design does not claim to defend against that condition.
 
-## Disable, indexes, and document history
+## Disable, local forgetting, indexes, and document history
 
 Disabling an integration stops future capture for that integration. It does not delete already stored chats, documents, indexes, or search results.
 
-The authenticated Library UI can export canonical captured projects, chats, messages, elected documents, source registrations, and retained document revisions as local JSON. It can revoke elected sources without deleting the physical files. General chat delete/forget is not implemented because the existing canonical retention model has no safe operation for it; deleting the preserved SQLite Library remains a separate user action.
+The authenticated Library UI can export canonical captured projects, chats, messages, elected documents, source registrations, and retained document revisions as local JSON. It can revoke elected sources without deleting the physical files.
+
+The Library can permanently forget a selected locally captured Chat. A successful forget deletes the Chat, its messages, its locally retained source content, its lexical and semantic retrieval rows, and derived evidence supported only by that Chat. Shared claims and entities remain only when surviving authoritative sources independently support them. Unrelated Chats, elected documents, and their evidence are unchanged.
+
+Before deleting content, Atomizer stores a durable deny record for the Chat's known stable and provisional source identities. Those identities are represented only by domain-separated SHA-256 digests. The record contains no message content, title, summary, raw URL, excerpt, or deleted source payload. Automatic capture remains blocked across restarts. If a provisional capture later resolves to a forgotten stable identity, that provisional local content is removed and its digest joins the same deny record.
+
+The Permissions & sources page provides an explicit **Allow recapture** action. It removes only the selected deny record so a later event can create a fresh Chat. It does not reconstruct or restore deleted content.
+
+Local forgetting affects only data controlled by this Atomizer Local Library. It does not delete copies retained by ChatGPT, Claude, Codex, browser history, external applications, remote services, earlier exports, or backups. It is a local product deletion control, not a claim of external or regulatory erasure.
 
 The runtime builds local lexical and derived indexes, including semantic vectors, entities, claims, temporal state, contradictions, and verification state. These remain in the local SQLite Library.
 

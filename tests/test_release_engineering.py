@@ -892,11 +892,11 @@ $exitCode = Invoke-LeafProcess -FilePath $env:ATOMIZER_TEST_PYTHON -ArgumentList
             self.assertEqual(source["version"], "0.2.0.0")
             self.assertEqual(source["version_name"], "0.2.0-dev0")
 
-    def test_release_migration_boundary_is_exactly_001_through_007(self) -> None:
+    def test_release_migration_boundary_is_exactly_001_through_008(self) -> None:
         identifiers = registered_migration_ids()
-        self.assertEqual(len(identifiers), 7)
+        self.assertEqual(len(identifiers), 8)
         self.assertEqual(identifiers[0], "001_initial")
-        self.assertEqual(identifiers[-1], "007_temporal_governance")
+        self.assertEqual(identifiers[-1], "008_chat_forgetting")
 
     def test_ci_manifest_uses_discovered_python_test_total(self) -> None:
         workflow = (PACKAGE_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

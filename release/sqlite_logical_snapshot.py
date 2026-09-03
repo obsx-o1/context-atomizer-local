@@ -19,6 +19,8 @@ AUTHORITATIVE_TABLES = (
     "schema_migrations",
     "projects",
     "chats",
+    "chat_identity_aliases",
+    "chat_forget_tombstones",
     "messages",
     "documents",
     "elected_sources",
