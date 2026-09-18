@@ -131,6 +131,7 @@ def render_permissions(
     pairing_code: str | None = None,
     managed_pairing_code: str | None = None,
     access: dict[str, Any] | None = None,
+    tombstones: list[dict[str, object]] | None = None,
 ) -> bytes:
     def integration_card(
         key: str, label: str, secondary_label: str, secondary_value: str
@@ -229,6 +230,33 @@ def render_permissions(
             )
         )
     access_controls.append("</div><p class='meta'>Manager expiry or disconnect never reopens direct access. Returning to direct local requires this explicit control.</p></section>")
+    recapture_items = []
+    for tombstone in tombstones or []:
+        group = str(tombstone["tombstone_id"])
+        recapture_items.append(
+            "<article class='card'>"
+            f"<h3>{escape(_host_label(str(tombstone['host'])))} Chat · {escape(group[:12])}…</h3>"
+            f"<p class='meta'>Forgotten {escape(str(tombstone['forgotten_at']))} · "
+            f"{escape(str(tombstone['identity_count']))} protected local identities</p>"
+            "<form method='post' action='/chat/allow-recapture'>"
+            f"<input type='hidden' name='csrf_token' value='{escape(csrf_token, quote=True)}'>"
+            f"<input type='hidden' name='tombstone_id' value='{escape(group, quote=True)}'>"
+            "<label><input type='checkbox' name='confirm' value='allow-recapture' required> "
+            "Allow a future fresh capture</label> "
+            "<button type='submit'>Allow recapture</button></form>"
+            "<p class='meta'>This removes only resurrection protection. It does not restore deleted content.</p>"
+            "</article>"
+        )
+    recapture_controls = (
+        "<section class='panel'><h2>Forgotten Chat recapture</h2>"
+        "<p>Forgotten Chats stay blocked from automatic capture until you explicitly allow them again.</p>"
+        + (
+            "<section class='grid'>" + "".join(recapture_items) + "</section>"
+            if recapture_items
+            else "<p class='empty'>No forgotten Chats are currently blocked.</p>"
+        )
+        + "</section>"
+    )
     content = (
         "<h1>Permissions &amp; sources</h1>"
         "<p>Permissions stay on this computer. Enable an integration once to capture supported future activity automatically. The ChatGPT Web browser permission also governs Claude Web capture through the same paired extension.</p>"
@@ -241,6 +269,7 @@ def render_permissions(
         + pairing_controls
         + managed_pairing_controls
         + "".join(access_controls)
+        + recapture_controls
         + "<section class='panel'><h2>Export captured material</h2>"
         "<p>Download canonical captured projects, chats, messages, elected documents, source registrations, and document revisions as local JSON.</p>"
         "<p><a href='/export'>Download Library export</a></p></section>"
@@ -354,7 +383,7 @@ def render_project(project: dict[str, Any], csrf_token: str, *, status: str | No
     return _page(str(project["display_label"]), content)
 
 
-def render_chat(chat: dict[str, Any]) -> bytes:
+def render_chat(chat: dict[str, Any], csrf_token: str) -> bytes:
     messages = []
     for message in chat["messages"]:
         role = str(message["role"])
@@ -369,11 +398,29 @@ def render_chat(chat: dict[str, Any]) -> bytes:
         if chat["display_label_source"] == "stored-title"
         else "Local fallback"
     )
+    chat_id = str(chat["chat_id"])
+    forget_controls = (
+        "<section class='panel'><h2>Forget this Chat</h2>"
+        "<p>The selected Chat will be permanently removed from the local Atomizer Library. "
+        "Its locally derived retrieval evidence will be removed. Automatic recapture will "
+        "remain blocked until you explicitly allow it again.</p>"
+        "<p>Copies retained by ChatGPT, Claude, Codex, browser history, external applications, "
+        "remote services, exports, or backups are outside Atomizer Local&#x27;s control.</p>"
+        "<form method='post' action='/chat/forget'>"
+        f"<input type='hidden' name='csrf_token' value='{escape(csrf_token, quote=True)}'>"
+        f"<input type='hidden' name='chat_id' value='{escape(chat_id, quote=True)}'>"
+        "<label><input type='checkbox' name='confirm' value='permanently-forget' required> "
+        "I understand this permanent local deletion and recapture block</label> "
+        "<button class='danger' type='submit'>Permanently forget Chat</button> "
+        f"<a href='{escape(_url('/chat', chat_id=chat_id), quote=True)}'>Cancel</a>"
+        "</form></section>"
+    )
     content = (
         f"<p><a href='{escape(project_url, quote=True)}'>← {escape(str(chat['project_display_label']))}</a></p>"
         f"<h1>{escape(str(chat['display_label']))}</h1><p><span class='pill'>{escape(_host_label(str(chat['host'])))}</span> "
         f"<span class='pill'>{title_source}</span></p>"
         + ("".join(messages) if messages else "<p class='empty'>No Messages.</p>")
+        + forget_controls
     )
     return _page(str(chat["display_label"]), content)
 

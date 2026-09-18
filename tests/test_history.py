@@ -16,6 +16,21 @@ from atomizer_local_client.projects.repository import get_or_create_project
 
 
 class HistoryTests(TemporaryDatabaseTest):
+    def test_established_database_open_does_not_rewrite_chat_identity_aliases(self) -> None:
+        receipt = ingest_chat_event(
+            self.database_path,
+            chat_event(event_id="alias-open", chat="alias-open-chat"),
+        )
+        with database(self.database_path) as connection:
+            self.assertEqual(connection.total_changes, 0)
+            self.assertIsNotNone(
+                connection.execute(
+                    "SELECT 1 FROM chat_identity_aliases WHERE chat_id = ?",
+                    (receipt.chat_id,),
+                ).fetchone()
+            )
+            self.assertEqual(connection.total_changes, 0)
+
     def test_provisional_new_chat_rebind_preserves_one_chat_and_both_real_messages(self) -> None:
         provisional = "provisional:new-chat:submission-one"
         prompt = ingest_chat_event(
@@ -620,9 +635,10 @@ class HistoryTests(TemporaryDatabaseTest):
 
         self.assertEqual(after, before)
         self.assertEqual(tuple(retired), ("synthetic-item", "preserve-me"))
-        self.assertEqual(versions[:7], registered_migration_ids())
+        current = registered_migration_ids()
+        self.assertEqual(tuple(value for value in versions if value in current), current)
         self.assertEqual(
-            versions[7:],
+            tuple(value for value in versions if value not in current),
             ("008_retired_local_extension", "009_retired_local_extension_aux"),
         )
         self.assertEqual(integrity, "ok")

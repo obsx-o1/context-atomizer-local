@@ -14,11 +14,15 @@ def open_database(database_path: Path) -> sqlite3.Connection:
     database_path = Path(database_path)
     database_path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database_path, timeout=5.0, isolation_level=None)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    connection.execute("PRAGMA busy_timeout = 5000")
-    connection.execute("PRAGMA journal_mode = WAL")
-    apply_migrations(connection)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA journal_mode = WAL")
+        apply_migrations(connection)
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
@@ -41,4 +45,3 @@ def transaction(connection: sqlite3.Connection) -> Iterator[None]:
         raise
     else:
         connection.commit()
-

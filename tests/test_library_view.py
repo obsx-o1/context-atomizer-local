@@ -484,6 +484,99 @@ class LibraryViewTests(TemporaryDatabaseTest):
             management_health["source_maintenance"]["state"], {"running", "paused"}
         )
 
+    def test_chat_forget_warning_and_cancel_path_make_no_change(self) -> None:
+        status, body, _ = self.get(f"/chat?chat_id={self.user.chat_id}")
+        self.assertEqual(status, 200)
+        self.assertIn("permanently removed from the local Atomizer Library", body)
+        self.assertIn("locally derived retrieval evidence will be removed", body)
+        self.assertIn("Automatic recapture will remain blocked", body)
+        for external in (
+            "ChatGPT",
+            "Claude",
+            "Codex",
+            "browser history",
+            "external applications",
+            "remote services",
+            "exports",
+            "backups",
+        ):
+            self.assertIn(external, body)
+        self.assertIn("outside Atomizer Local&#x27;s control", body)
+        self.assertIn("Cancel", body)
+
+        payload = urllib.parse.urlencode(
+            {
+                "csrf_token": self.server.csrf_token,
+                "chat_id": self.user.chat_id,
+            }
+        ).encode("utf-8")
+        rejected, _, _ = self.raw_request(
+            "POST",
+            "/chat/forget",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Cookie": self.session_cookie(),
+                "Origin": self.base_url,
+                "Sec-Fetch-Site": "same-origin",
+            },
+            body=payload,
+        )
+        self.assertEqual(rejected, 400)
+        with database(self.database_path) as connection:
+            self.assertIsNotNone(
+                connection.execute(
+                    "SELECT 1 FROM chats WHERE chat_id = ?", (self.user.chat_id,)
+                ).fetchone()
+            )
+
+    def test_confirmed_chat_forget_and_allow_recapture_are_truthful(self) -> None:
+        status, body = self.post(
+            "/chat/forget",
+            {
+                "csrf_token": self.server.csrf_token,
+                "chat_id": self.user.chat_id,
+                "confirm": "permanently-forget",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Chat permanently removed", body)
+        self.assertNotIn("librarychatsearchmarker", body)
+        with database(self.database_path) as connection:
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM chats WHERE chat_id = ?", (self.user.chat_id,)
+                ).fetchone()
+            )
+            tombstone = connection.execute(
+                "SELECT tombstone_id FROM chat_forget_tombstones LIMIT 1"
+            ).fetchone()
+        self.assertIsNotNone(tombstone)
+
+        status, permissions, _ = self.get("/permissions")
+        self.assertEqual(status, 200)
+        self.assertIn("Allow recapture", permissions)
+        self.assertIn("does not restore deleted content", permissions)
+        status, allowed = self.post(
+            "/chat/allow-recapture",
+            {
+                "csrf_token": self.server.csrf_token,
+                "tombstone_id": str(tombstone["tombstone_id"]),
+                "confirm": "allow-recapture",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("Deleted Chat content was not restored", allowed)
+        with database(self.database_path) as connection:
+            self.assertEqual(
+                connection.execute("SELECT count(*) FROM chat_forget_tombstones").fetchone()[0],
+                0,
+            )
+            self.assertIsNone(
+                connection.execute(
+                    "SELECT 1 FROM chats WHERE chat_id = ?", (self.user.chat_id,)
+                ).fetchone()
+            )
+
     def test_directory_election_and_revocation_keep_physical_tree(self) -> None:
         directory = self.root / "UI_DIRECTORY"
         directory.mkdir()

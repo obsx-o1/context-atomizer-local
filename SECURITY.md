@@ -18,6 +18,8 @@ Library binds to `127.0.0.1` and accepts only the exact `Host` value `127.0.0.1:
 
 State-changing requests additionally require the exact Library `Origin`, a same-origin or absent `Sec-Fetch-Site` value, and the session's CSRF token. Cross-site fetch contexts are rejected. The unauthenticated `/health` response is deliberately limited to service availability and contains no Library content, permissions, CSRF token, or detailed integration state.
 
+Permanent Chat forgetting is a Library-session action with an explicit confirmation. Atomizer commits content-free SHA-256 identity tombstones before deleting authoritative and derived rows. Capture and forgetting serialize through SQLite write transactions, so capture either completes before the forget cleanup and is deleted with it, or observes the tombstone and is denied. If cleanup fails, the UI reports an error, the tombstone remains active, and the operation is safely retryable. Removing a tombstone is a separate confirmed Library action and only permits a future fresh capture.
+
 ## Browser extension boundary
 
 The capture bridge binds only to fixed endpoint `127.0.0.1:43117`. If that port is occupied, capture startup fails closed; there is no alternative-port probing or fallback.

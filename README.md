@@ -13,6 +13,7 @@ This repository is a development snapshot. It is not a hosted service, browser-s
 - Lexical search and local semantic, entity, claim, temporal, contradiction, and verification state.
 - Automatic bounded enrichment while the Library runtime is active.
 - Authenticated Library sessions and explicitly paired browser capture.
+- Canonical local Chat forgetting with durable hashed recapture blocking and an explicit allow-recapture control.
 - Windows runtime, installer, and validation tooling.
 - Experimental unsigned macOS user-runtime artifacts and native architecture CI.
 - One read-only MCP 2026-07-28 Library server and an Agent Plugins 1.0 package for supported local hosts.
